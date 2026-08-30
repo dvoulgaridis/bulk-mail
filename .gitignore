@@ -1,0 +1,23 @@
+# Build output
+**/dist/
+/bulk-mail
+/bulk-mail.exe
+*.out
+
+# Local runtime state
+/data/
+/logs/
+/tmp/
+
+# Node / TypeScript
+node_modules/
+.pnpm-store/
+.vite/
+
+# Local editor state
+/.vscode/
+*.code-workspace
+
+# OS
+.DS_Store
+Thumbs.db

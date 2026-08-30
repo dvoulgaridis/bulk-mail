@@ -1,0 +1,33 @@
+{
+    "server": {
+        "address": "127.0.0.1",
+        "port": 0,
+        "open_browser": true
+    },
+
+    "tasks": {
+        "max_concurrent": 4,
+        "max_queued": 8,
+        "shutdown_timeout": "30s"
+    },
+
+    "delivery": {
+        "send_timeout": "2m",
+        "smtp_connect_timeout": "15s"
+    },
+
+    "logging": {
+        "level": "info",
+        "file": ""
+    },
+
+    "integrations": {
+        "google": {
+            "client_id": ""
+        },
+        "libreoffice": {
+            "executable": "",
+            "batch_timeout": "2m"
+        }
+    }
+}

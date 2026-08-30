@@ -1,0 +1,16 @@
+{
+  "name": "bulk-mail",
+  "private": true,
+  "description": "Local desktop-style bulk email application with an embedded web UI.",
+  "license": "MIT",
+  "packageManager": "pnpm@11.22.0",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "dev:ui": "pnpm --dir frontend run dev",
+    "build:ui": "pnpm --dir frontend run build",
+    "check:ui": "pnpm --dir frontend run typecheck",
+    "preview:ui": "pnpm --dir frontend run preview"
+  }
+}
