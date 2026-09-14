@@ -1,14 +1,16 @@
 <script setup lang="ts">
+import { useTemplateRef } from "vue";
 import { useCampaignsFeature } from "../campaigns/useCampaigns";
 
 const {
   campaign,
-  openAttachmentPicker,
   handleAttachmentChange,
   removeAttachment,
   isDOCXAttachment,
   formatFileSize,
 } = useCampaignsFeature();
+
+const fileInput = useTemplateRef<HTMLInputElement>("fileInput");
 </script>
 
 <template>
@@ -22,7 +24,7 @@ const {
       @change="handleAttachmentChange"
     />
     <div class="app-stage-actions app-stage-actions--start">
-      <button type="button" @click="openAttachmentPicker">Browse</button>
+      <button type="button" @click="fileInput?.click()">Browse</button>
     </div>
     <p class="app-form-help">
       * DOCX files support placeholders and are converted to PDF; other files

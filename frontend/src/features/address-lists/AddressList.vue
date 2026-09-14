@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useTemplateRef } from "vue";
 import ExpandableSearch from "../../components/ExpandableSearch.vue";
 import PlusButton from "../../components/PlusButton.vue";
 import { addressFieldValue } from "../../import";
@@ -17,7 +18,6 @@ const {
   deleteSelectedEntries,
   suppressSelectedEntries,
   selectAllEntries,
-  openImportPicker,
   handleImportChange,
   save,
   remove,
@@ -25,6 +25,8 @@ const {
   updateEntryEmail,
   updateEntryField,
 } = useAddressListsFeature();
+
+const importInput = useTemplateRef<HTMLInputElement>("importInput");
 </script>
 
 <template>
@@ -62,7 +64,7 @@ const {
       <div class="data-table__toolbar">
         <div class="data-table__toolbar-start">
           <PlusButton label="Add address" @click="addEntry" />
-          <button type="button" class="data-table__action" @click="openImportPicker">Import</button>
+          <button type="button" class="data-table__action" @click="importInput?.click()">Import</button>
           <button
             type="button"
             class="data-table__action"

@@ -4,7 +4,6 @@ import {
   provide,
   reactive,
   ref,
-  useTemplateRef,
   type InjectionKey,
 } from "vue";
 import type {
@@ -68,7 +67,6 @@ export function useAddressListsFeature(): AddressListsFeature {
 }
 
 function createAddressListsFeature(workspace: WorkspaceContext) {
-  const importInput = useTemplateRef<HTMLInputElement>("importInput");
   const listSearch = ref("");
   const entrySearch = ref("");
   const selectedEntryKeys = ref<string[]>([]);
@@ -200,10 +198,6 @@ function createAddressListsFeature(workspace: WorkspaceContext) {
 
   function selectAllEntries(): void {
     selectedEntryKeys.value = selectedList.entries.map(entryKey);
-  }
-
-  function openImportPicker(): void {
-    importInput.value?.click();
   }
 
   async function handleImportChange(event: Event): Promise<void> {
@@ -464,7 +458,6 @@ function createAddressListsFeature(workspace: WorkspaceContext) {
     deleteSelectedEntries,
     suppressSelectedEntries,
     selectAllEntries,
-    openImportPicker,
     handleImportChange,
     mappingPreview,
     addCustomMapping,

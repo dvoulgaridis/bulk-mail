@@ -4,7 +4,6 @@ import {
   provide,
   reactive,
   ref,
-  useTemplateRef,
   watch,
   type InjectionKey,
 } from "vue";
@@ -51,7 +50,6 @@ function createCampaignsFeature(
   const campaign = reactive<Campaign>(newCampaign());
   const mode = ref<CampaignMode>("send");
   const sampleAddressEntryID = ref(0);
-  const fileInput = useTemplateRef<HTMLInputElement>("fileInput");
   const preflightResult = ref<CampaignPreflight | null>(null);
   const preflightSignature = ref("");
   const unresolvedConfirmed = ref(false);
@@ -154,10 +152,6 @@ function createCampaignsFeature(
       preflightSignature.value = signature;
       unresolvedConfirmed.value = false;
     });
-  }
-
-  function openAttachmentPicker(): void {
-    fileInput.value?.click();
   }
 
   async function handleAttachmentChange(event: Event): Promise<void> {
@@ -328,7 +322,6 @@ function createCampaignsFeature(
     saveCampaign,
     deleteCampaign,
     runPreflight,
-    openAttachmentPicker,
     handleAttachmentChange,
     removeAttachment,
     run,
