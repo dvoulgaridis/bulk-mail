@@ -16,10 +16,6 @@ var (
 
 // Runner callbacks and state.
 
-type activeTask struct {
-	cancel context.CancelCauseFunc
-}
-
 type ClaimFunc func(context.Context) (int64, bool, error)
 
 type ExecuteFunc func(context.Context, int64)
@@ -38,7 +34,7 @@ type Runner struct {
 	claim        ClaimFunc
 	execute      ExecuteFunc
 	cancelQueued CancelQueuedFunc
-	active       map[int64]activeTask
+	active       map[int64]context.CancelCauseFunc
 	wg           sync.WaitGroup
 }
 
@@ -54,7 +50,7 @@ func New(parent context.Context, maxConcurrent int) *Runner {
 		stop:          stop,
 		maxConcurrent: maxConcurrent,
 		wake:          make(chan struct{}, maxConcurrent),
-		active:        map[int64]activeTask{},
+		active:        map[int64]context.CancelCauseFunc{},
 	}
 }
 
@@ -87,8 +83,8 @@ func (runner *Runner) Shutdown(ctx context.Context) error {
 	if !runner.closed {
 		runner.closed = true
 		runner.stop(ErrInterrupted)
-		for _, task := range runner.active {
-			task.cancel(ErrInterrupted)
+		for _, cancel := range runner.active {
+			cancel(ErrInterrupted)
 		}
 	}
 	runner.mu.Unlock()
@@ -122,8 +118,8 @@ func (runner *Runner) Cancel(ctx context.Context, id int64) (bool, error) {
 	if runner.closed || !runner.started {
 		return false, nil
 	}
-	if task, exists := runner.active[id]; exists {
-		task.cancel(ErrCancelled)
+	if cancel, exists := runner.active[id]; exists {
+		cancel(ErrCancelled)
 		return true, nil
 	}
 	return runner.cancelQueued(ctx, id)
@@ -151,10 +147,22 @@ func (runner *Runner) worker() {
 			}
 			continue
 		}
-		runner.execute(taskContext, id)
-		runner.mu.Lock()
-		delete(runner.active, id)
-		runner.mu.Unlock()
+		runner.executeActiveTask(taskContext, id)
+	}
+}
+
+func (runner *Runner) executeActiveTask(ctx context.Context, id int64) {
+	defer runner.releaseActiveTask(id)
+	runner.execute(ctx, id)
+}
+
+func (runner *Runner) releaseActiveTask(id int64) {
+	runner.mu.Lock()
+	cancel, exists := runner.active[id]
+	delete(runner.active, id)
+	runner.mu.Unlock()
+	if exists {
+		cancel(nil)
 	}
 }
 
@@ -172,7 +180,7 @@ func (runner *Runner) claimTask() (int64, context.Context, bool, error) {
 		return 0, nil, false, nil
 	}
 	ctx, cancel := context.WithCancelCause(runner.ctx)
-	runner.active[id] = activeTask{cancel: cancel}
+	runner.active[id] = cancel
 	return id, ctx, true, nil
 }
 
