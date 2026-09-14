@@ -20,8 +20,14 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     proxy: {
-      "/api": backend,
-      "/internal": backend,
+      "/api": {
+        target: backend,
+        changeOrigin: false,
+      },
+      "/internal": {
+        target: backend,
+        changeOrigin: false,
+      },
     },
   },
   build: {
