@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"log/slog"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -1053,6 +1054,7 @@ func (service *CampaignService) finishCompleted(taskID int64, lastError string) 
 	ctx := context.Background()
 	task, err := service.execution.GetTask(ctx, taskID)
 	if err != nil {
+		slog.Error("load task for completion failed", "task_id", taskID)
 		return
 	}
 	status := "completed"
@@ -1100,6 +1102,7 @@ func (service *CampaignService) recordRemaining(
 			LastError:      safeDiagnostic(message),
 		})
 		if err != nil {
+			slog.Error("record remaining delivery outcome failed", "task_id", taskID)
 			continue
 		}
 		if strings.HasPrefix(status, "failed_") {
@@ -1111,6 +1114,7 @@ func (service *CampaignService) recordRemaining(
 }
 
 func (service *CampaignService) recordFailure(taskID, deliveryID int64, status string, err error) {
+	slog.Error("campaign item failed", "task_id", taskID, "delivery_id", deliveryID, "status", status)
 	service.recordFailureWithProvider(taskID, deliveryID, status, "", err)
 }
 
