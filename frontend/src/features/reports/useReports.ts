@@ -2,7 +2,6 @@ import { computed, inject, provide, ref, watch, type InjectionKey } from "vue";
 import type { TaskReport } from "../../api/types";
 import type { WorkspaceContext } from "../../app/context";
 import { saveTextFile } from "../../common/files";
-import { shortDate } from "../../common/format";
 
 export type ReportsFeature = ReturnType<typeof createReportsFeature>;
 
@@ -21,35 +20,12 @@ export function useReportsFeature(): ReportsFeature {
 }
 
 function createReportsFeature(workspace: WorkspaceContext) {
-  const search = ref("");
   const selectedTaskID = ref(0);
   const reportVisible = ref(false);
   const selectedTaskReport = ref<TaskReport | null>(null);
   const terminalStatuses = new Set(["completed", "completed_with_errors", "cancelled", "interrupted"]);
   let reportRequestID = 0;
 
-  const taskRows = computed(() =>
-    workspace.tasks.items.map((task) => ({
-      id: task.id,
-      date: shortDate(task.createdAt),
-      campaign: task.campaignName || "Unnamed campaign",
-      progress: `${Math.min(task.sent + task.failed + task.skipped, task.total)}/${task.total}`,
-      failed: String(task.failed),
-      skipped: String(task.skipped || 0),
-      status: task.status,
-      lastError: task.lastError || "",
-    })),
-  );
-  const filteredTaskRows = computed(() => {
-    const query = search.value.trim().toLowerCase();
-    if (!query) return taskRows.value;
-    return taskRows.value.filter((row) =>
-      [row.date, row.campaign, row.progress, row.failed, row.skipped, row.status, row.lastError].some((value) =>
-        String(value).toLowerCase().includes(query),
-      ),
-    );
-  });
-  const selectedTaskRow = computed(() => taskRows.value.find((row) => row.id === selectedTaskID.value) || null);
   const selectedTask = computed(() => workspace.tasks.items.find((item) => item.id === selectedTaskID.value) || null);
   const isSelectedTaskActive = computed(() =>
     ["queued", "preparing", "running"].includes(selectedTask.value?.status || ""),
@@ -150,12 +126,9 @@ function createReportsFeature(workspace: WorkspaceContext) {
   }
 
   return {
-    search,
     selectedTaskID,
     reportVisible,
-    taskRows,
-    filteredTaskRows,
-    selectedTaskRow,
+    selectedTask,
     selectedTaskReport,
     isSelectedTaskActive,
     selectTask,

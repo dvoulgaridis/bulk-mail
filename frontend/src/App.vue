@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, watch } from "vue";
 import { provideApplication } from "./app";
 import NotificationStack from "./components/NotificationStack.vue";
 import CampaignEditor from "./features/campaigns/CampaignEditor.vue";
-import CampaignList from "./features/campaigns/CampaignList.vue";
+import Campaigns from "./features/campaigns/Campaigns.vue";
 import Dashboard from "./features/dashboard/Dashboard.vue";
 import ProfileDetail from "./features/profiles/ProfileDetail.vue";
 import ProfileList from "./features/profiles/ProfileList.vue";
@@ -123,7 +123,7 @@ onBeforeUnmount(() => {
           <AddressLists v-else-if="currentView === 'address-lists'" />
           <AddressList v-else-if="currentView === 'address-list-detail'" />
           <ColumnMapping v-else-if="currentView === 'mapping'" />
-          <CampaignList v-else-if="currentView === 'campaigns'" />
+          <Campaigns v-else-if="currentView === 'campaigns'" />
           <CampaignEditor v-else-if="currentView === 'new-campaign'" />
           <Suppressions v-else-if="currentView === 'suppressions'" />
           <Settings v-else-if="currentView === 'settings'" />
