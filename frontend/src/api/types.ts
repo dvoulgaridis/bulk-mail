@@ -201,7 +201,6 @@ export type AppState = {
 
 export type WorkspaceState = Omit<AppState, "settings"> & {
   settings: AppSettings | null;
-  tasks: Task[];
 };
 
 export type TaskStreamPayload = {
@@ -297,6 +296,5 @@ export function emptyWorkspaceState(): WorkspaceState {
         sendEndpoint: "",
       },
     },
-    tasks: [],
   };
 }

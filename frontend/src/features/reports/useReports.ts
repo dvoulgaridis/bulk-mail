@@ -29,7 +29,7 @@ function createReportsFeature(workspace: WorkspaceContext) {
   let reportRequestID = 0;
 
   const taskRows = computed(() =>
-    workspace.state.tasks.map((task) => ({
+    workspace.tasks.items.map((task) => ({
       id: task.id,
       date: shortDate(task.createdAt),
       campaign: task.campaignName || "Unnamed campaign",
@@ -50,8 +50,8 @@ function createReportsFeature(workspace: WorkspaceContext) {
     );
   });
   const selectedTaskRow = computed(() => taskRows.value.find((row) => row.id === selectedTaskID.value) || null);
-  const selectedTask = computed(() => workspace.state.tasks.find((item) => item.id === selectedTaskID.value) || null);
-  const selectedTaskActive = computed(() =>
+  const selectedTask = computed(() => workspace.tasks.items.find((item) => item.id === selectedTaskID.value) || null);
+  const isSelectedTaskActive = computed(() =>
     ["queued", "preparing", "running"].includes(selectedTask.value?.status || ""),
   );
 
@@ -89,10 +89,10 @@ function createReportsFeature(workspace: WorkspaceContext) {
     const taskID = selectedTaskID.value;
     const requestID = ++reportRequestID;
     let report = await workspace.api.request<TaskReport>(`/api/tasks/${taskID}`);
-    let current = workspace.state.tasks.find((task) => task.id === taskID);
+    let current = workspace.tasks.items.find((task) => task.id === taskID);
     if (current && terminalStatuses.has(current.status) && !terminalStatuses.has(report.task.status)) {
       report = await workspace.api.request<TaskReport>(`/api/tasks/${taskID}`);
-      current = workspace.state.tasks.find((task) => task.id === taskID);
+      current = workspace.tasks.items.find((task) => task.id === taskID);
     }
     if (requestID !== reportRequestID || selectedTaskID.value !== taskID) return;
     selectedTaskReport.value = current ? { ...report, task: current } : report;
@@ -157,7 +157,7 @@ function createReportsFeature(workspace: WorkspaceContext) {
     filteredTaskRows,
     selectedTaskRow,
     selectedTaskReport,
-    selectedTaskActive,
+    isSelectedTaskActive,
     selectTask,
     viewSelectedTaskReport,
     openTaskReport,

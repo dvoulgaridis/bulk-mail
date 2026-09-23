@@ -31,9 +31,9 @@ const campaignsKey: InjectionKey<CampaignsFeature> = Symbol("campaigns");
 
 export function provideCampaignsFeature(
   workspace: WorkspaceContext,
-  onTaskQueued: (taskID: number) => void,
+  selectTask: (taskID: number) => void,
 ): CampaignsFeature {
-  const feature = createCampaignsFeature(workspace, onTaskQueued);
+  const feature = createCampaignsFeature(workspace, selectTask);
   provide(campaignsKey, feature);
   return feature;
 }
@@ -46,7 +46,7 @@ export function useCampaignsFeature(): CampaignsFeature {
 
 function createCampaignsFeature(
   workspace: WorkspaceContext,
-  onTaskQueued: (taskID: number) => void,
+  selectTask: (taskID: number) => void,
 ) {
   const campaign = reactive<Campaign>(newCampaign());
   const sampleAddressEntryID = ref(0);
@@ -214,7 +214,7 @@ function createCampaignsFeature(
         method: "POST",
         body: executionCommand(campaignID),
       });
-      await applyQueuedTask(task, "Campaign queued.");
+      handleQueuedTask(task, "Campaign queued.");
     });
   }
 
@@ -229,14 +229,13 @@ function createCampaignsFeature(
         method: "POST",
         body: executionCommand(campaignID),
       });
-      await applyQueuedTask(task, "Document generation queued.");
+      handleQueuedTask(task, "Document generation queued.");
     });
   }
 
-  async function applyQueuedTask(task: Task, message: string): Promise<void> {
-    workspace.mergeTasks([task]);
-    await workspace.refresh();
-    onTaskQueued(task.id);
+  function handleQueuedTask(task: Task, message: string): void {
+    workspace.tasks.upsert([task]);
+    selectTask(task.id);
     workspace.navigate("campaigns");
     workspace.notify(message);
   }

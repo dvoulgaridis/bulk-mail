@@ -13,7 +13,7 @@ const {
   selectedTaskID,
   filteredTaskRows,
   selectedTaskRow,
-  selectedTaskActive,
+  isSelectedTaskActive,
   selectTask,
   viewSelectedTaskReport,
   cancelSelectedTask,
@@ -75,7 +75,7 @@ function openCampaign(event: Event): void {
     <div v-if="selectedTaskRow" class="app-stage-actions app-stage-actions--start">
       <span class="app-stage-note">Selected {{ selectedTaskRow.campaign }}</span>
       <button type="button" @click="viewSelectedTaskReport">View report</button>
-      <button v-if="selectedTaskActive" type="button" class="is-danger" @click="cancelSelectedTask">Cancel task</button>
+      <button v-if="isSelectedTaskActive" type="button" class="is-danger" @click="cancelSelectedTask">Cancel task</button>
     </div>
     <TaskReport />
   </section>

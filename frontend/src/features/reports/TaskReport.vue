@@ -7,7 +7,7 @@ import { useReportsFeature } from "./useReports";
 const { state } = useWorkspace();
 const {
   selectedTaskReport,
-  selectedTaskActive,
+  isSelectedTaskActive,
   cancelSelectedTask,
   downloadArchive,
   exportResults,
@@ -59,7 +59,7 @@ const retryableCount = computed(
     </div>
 
     <div class="app-stage-actions app-stage-actions--start">
-      <button v-if="selectedTaskActive" type="button" class="is-danger" @click="cancelSelectedTask">Cancel task</button>
+      <button v-if="isSelectedTaskActive" type="button" class="is-danger" @click="cancelSelectedTask">Cancel task</button>
       <button
         v-if="selectedTaskReport.archiveAvailable"
         type="button"

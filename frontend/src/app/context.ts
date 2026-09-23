@@ -1,6 +1,7 @@
 import { inject, type InjectionKey, type Ref } from "vue";
 import type { ApiClient } from "../api/client";
-import type { Task, WorkspaceState } from "../api/types";
+import type { WorkspaceState } from "../api/types";
+import type { TaskList } from "../features/tasks/TaskList";
 
 export type RouteName =
   | "dashboard"
@@ -29,9 +30,9 @@ export type WorkspaceContext = {
   busy: Ref<boolean>;
   notifications: Ref<Notification[]>;
   state: WorkspaceState;
+  tasks: TaskList;
   bootstrap: () => Promise<void>;
   refresh: () => Promise<void>;
-  mergeTasks: (tasks: Task[]) => void;
   disconnectTaskEvents: () => void;
   navigate: (route: RouteName) => void;
   notify: (text: string, type?: Notification["type"]) => void;

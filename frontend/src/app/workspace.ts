@@ -4,8 +4,8 @@ import {
   emptyWorkspaceState,
   type AppState,
   type TaskStreamPayload,
-  type Task,
 } from "../api/types";
+import { TaskList } from "../features/tasks/TaskList";
 import type { Notification, RouteName, WorkspaceContext } from "./context";
 
 const sectionLabels: Record<RouteName, string> = {
@@ -28,6 +28,7 @@ export function createWorkspace(): WorkspaceContext {
   const busy = ref(false);
   const notifications = ref<Notification[]>([]);
   const state = reactive(emptyWorkspaceState());
+  const tasks = new TaskList();
   let notificationID = 0;
   let taskEvents: EventSource | null = null;
 
@@ -56,17 +57,11 @@ export function createWorkspace(): WorkspaceContext {
     disconnectTaskEvents();
     taskEvents = new EventSource("/api/events/tasks");
     taskEvents.addEventListener("tasks-snapshot", (event) => {
-      state.tasks = parseTaskEvent(event).tasks.sort(newestTaskFirst);
+      tasks.replaceAll(parseTaskEvent(event).tasks);
     });
     taskEvents.addEventListener("tasks-updated", (event) => {
-      mergeTasks(parseTaskEvent(event).tasks);
+      tasks.upsert(parseTaskEvent(event).tasks);
     });
-  }
-
-  function mergeTasks(tasks: Task[]): void {
-    const merged = new Map(state.tasks.map((task) => [task.id, task]));
-    for (const task of tasks) merged.set(task.id, task);
-    state.tasks = Array.from(merged.values()).sort(newestTaskFirst);
   }
 
   function disconnectTaskEvents(): void {
@@ -110,9 +105,9 @@ export function createWorkspace(): WorkspaceContext {
     busy,
     notifications,
     state,
+    tasks,
     bootstrap,
     refresh,
-    mergeTasks,
     disconnectTaskEvents,
     navigate,
     notify,
@@ -123,10 +118,6 @@ export function createWorkspace(): WorkspaceContext {
 
 function parseTaskEvent(event: Event): TaskStreamPayload {
   return JSON.parse((event as MessageEvent<string>).data) as TaskStreamPayload;
-}
-
-function newestTaskFirst(left: Task, right: Task): number {
-  return right.id - left.id;
 }
 
 function errorMessage(error: unknown): string {
