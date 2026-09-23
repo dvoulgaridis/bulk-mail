@@ -87,12 +87,11 @@ type PreflightSample struct {
 }
 
 type PreflightResult struct {
-	Count              int                       `json:"count"`
-	Attachments        []PreflightAttachmentInfo `json:"attachments"`
-	Unresolved         []UnresolvedPlaceholder   `json:"unresolved"`
-	Confirmation       []string                  `json:"confirmation"`
-	Samples            []PreflightSample         `json:"samples"`
-	LibreOfficeChecked bool                      `json:"libreOfficeChecked"`
+	Count        int                       `json:"count"`
+	Attachments  []PreflightAttachmentInfo `json:"attachments"`
+	Unresolved   []UnresolvedPlaceholder   `json:"unresolved"`
+	Confirmation []string                  `json:"confirmation"`
+	Samples      []PreflightSample         `json:"samples"`
 }
 
 type GeneratedArchive struct {
@@ -225,15 +224,14 @@ func (service *CampaignService) SaveCampaign(
 	if err := validatePersonalization(campaign.Personalization); err != nil {
 		return store.Campaign{}, err
 	}
-	campaign.Personalization.FirstNameFormat = normalizedFormat(
-		campaign.Personalization.FirstNameFormat,
-	)
-	campaign.Personalization.LastNameFormat = normalizedFormat(
-		campaign.Personalization.LastNameFormat,
-	)
-	campaign.Personalization.FullNameFormat = normalizedFormat(
-		campaign.Personalization.FullNameFormat,
-	)
+	for _, options := range []*store.PlaceholderOptions{
+		&campaign.Personalization.Message,
+		&campaign.Personalization.Attachments.PlaceholderOptions,
+	} {
+		options.FirstNameFormat = normalizedFormat(options.FirstNameFormat)
+		options.LastNameFormat = normalizedFormat(options.LastNameFormat)
+		options.FullNameFormat = normalizedFormat(options.FullNameFormat)
+	}
 	for index := range campaign.Message.Attachments {
 		attachment := &campaign.Message.Attachments[index]
 		attachment.Filename = safeFilename(attachment.Filename)
@@ -267,7 +265,7 @@ func (service *CampaignService) Preflight(
 		return PreflightResult{}, ctx.Err()
 	}
 	budget := newAttachmentBudget()
-	staticPDFs, sharedBytes, err := prepareSharedAttachments(
+	sharedDocuments, sharedBytes, err := prepareSharedAttachments(
 		ctx,
 		service.preflight,
 		campaign.Campaign.Message.Attachments,
@@ -279,9 +277,9 @@ func (service *CampaignService) Preflight(
 	}
 	defer budget.release(sharedBytes)
 	for _, entry := range sampleEntries(campaign.AddressList.Entries, command.SampleAddressEntryID) {
-		fields := personalizedFields(entry, campaign.Campaign.Personalization)
+		fields := personalizedFields(entry, campaign.Campaign.Personalization.Attachments.PlaceholderOptions)
 		sample := PreflightSample{
-			MessagePreview: messagePreview(entry, fields, campaign.Campaign.Message),
+			MessagePreview: messagePreview(entry, campaign.Campaign.Message, campaign.Campaign.Personalization.Message),
 			Attachments:    []PreflightAttachment{},
 		}
 		attachments, reserved, err := prepareAddressEntryAttachments(
@@ -290,7 +288,7 @@ func (service *CampaignService) Preflight(
 			campaign.Campaign.Message.Attachments,
 			campaign.Documents,
 			fields,
-			staticPDFs,
+			sharedDocuments,
 			budget,
 		)
 		if err != nil {
@@ -349,17 +347,18 @@ func validatePreparedCampaign(
 		)
 	}
 	result := PreflightResult{
-		Count:              len(campaign.AddressList.Entries),
-		Attachments:        []PreflightAttachmentInfo{},
-		Unresolved:         []UnresolvedPlaceholder{},
-		Confirmation:       []string{},
-		Samples:            []PreflightSample{},
-		LibreOfficeChecked: len(campaign.Documents) > 0,
+		Count:        len(campaign.AddressList.Entries),
+		Attachments:  []PreflightAttachmentInfo{},
+		Unresolved:   []UnresolvedPlaceholder{},
+		Confirmation: []string{},
+		Samples:      []PreflightSample{},
 	}
 	locations := map[string]map[string]bool{}
-	addLocations(locations, "subject", templates.Keys(campaign.Campaign.Message.Subject))
-	addLocations(locations, "message body", templates.Keys(campaign.Campaign.Message.Body))
-	addLocations(locations, "HTML body", templates.Keys(campaign.Campaign.Message.HTMLBody))
+	if campaign.Campaign.Personalization.Message.SubstitutePlaceholders {
+		addLocations(locations, "subject", templates.Keys(campaign.Campaign.Message.Subject))
+		addLocations(locations, "message body", templates.Keys(campaign.Campaign.Message.Body))
+		addLocations(locations, "HTML body", templates.Keys(campaign.Campaign.Message.HTMLBody))
+	}
 	documentID := 0
 	for _, attachment := range campaign.Campaign.Message.Attachments {
 		info := PreflightAttachmentInfo{
@@ -369,9 +368,11 @@ func validatePreparedCampaign(
 		if isDOCXFilename(attachment.Filename) {
 			input := campaign.Documents[documentID]
 			info.Placeholders = input.Placeholders()
-			info.ConvertedToPDF = true
+			info.ConvertedToPDF = input.ConvertToPDF
 			addLocations(locations, "document "+input.Filename, info.Placeholders)
-			addLocations(locations, "output filename for "+input.Filename, templates.Keys(input.OutputFilename))
+			if input.ConvertToPDF && input.SubstitutePlaceholders {
+				addLocations(locations, "output filename for "+input.Filename, templates.Keys(input.OutputFilename))
+			}
 			documentID++
 		}
 		result.Attachments = append(result.Attachments, info)
@@ -384,19 +385,29 @@ func validatePreparedCampaign(
 	available["full_name"] = true
 	for _, key := range sortedLocationKeys(locations) {
 		reason := ""
+		issueLocations := mapKeys(locations[key])
 		if !available[key] {
 			reason = "missing_field"
-		} else if neverPopulated(
-			key,
-			campaign.AddressList.Entries,
-			campaign.Campaign.Personalization,
-		) {
-			reason = "never_populated"
+		} else {
+			unpopulated := []string{}
+			for _, location := range issueLocations {
+				options := campaign.Campaign.Personalization.Attachments.PlaceholderOptions
+				if location == "subject" || location == "message body" || location == "HTML body" {
+					options = campaign.Campaign.Personalization.Message
+				}
+				if neverPopulated(key, campaign.AddressList.Entries, options) {
+					unpopulated = append(unpopulated, location)
+				}
+			}
+			if len(unpopulated) > 0 {
+				reason = "never_populated"
+				issueLocations = unpopulated
+			}
 		}
 		if reason == "" {
 			continue
 		}
-		issue := UnresolvedPlaceholder{Key: key, Reason: reason, Locations: mapKeys(locations[key])}
+		issue := UnresolvedPlaceholder{Key: key, Reason: reason, Locations: issueLocations}
 		result.Unresolved = append(result.Unresolved, issue)
 		result.Confirmation = append(result.Confirmation, confirmationValue(issue))
 	}
@@ -480,6 +491,10 @@ func prepareCampaign(snapshot CampaignTaskSnapshot) (preparedCampaign, error) {
 		return preparedCampaign{}, err
 	}
 	campaign.Campaign.Message.Attachments = attachments
+	for index := range documents {
+		documents[index].SubstitutePlaceholders = snapshot.Campaign.Personalization.Attachments.SubstitutePlaceholders
+		documents[index].ConvertToPDF = snapshot.Campaign.Personalization.Attachments.ConvertDOCXToPDF
+	}
 	campaign.Documents = documents
 	return campaign, nil
 }
@@ -531,7 +546,7 @@ type preparedSend struct {
 type campaignItem struct {
 	Index               int
 	Entry               store.AddressEntry
-	Fields              map[string]string
+	AttachmentFields    map[string]string
 	Attachments         []mail.Attachment
 	ReservedBytes       int64
 	InitiallySuppressed bool
@@ -566,7 +581,7 @@ func (service *CampaignService) executeSend(ctx context.Context, run preparedSen
 		return
 	}
 	budget := newAttachmentBudget()
-	staticPDFs, sharedBytes, err := prepareSharedAttachments(
+	sharedDocuments, sharedBytes, err := prepareSharedAttachments(
 		ctx,
 		service.converter,
 		run.campaign.Campaign.Message.Attachments,
@@ -602,7 +617,7 @@ func (service *CampaignService) executeSend(ctx context.Context, run preparedSen
 	go service.prepareCampaignItems(
 		pipelineContext,
 		run.campaign,
-		staticPDFs,
+		sharedDocuments,
 		budget,
 		admission,
 		ready,
@@ -706,8 +721,8 @@ func (service *CampaignService) executeSend(ctx context.Context, run preparedSen
 				service.converter,
 				run.campaign.Campaign.Message.Attachments,
 				run.campaign.Documents,
-				item.Fields,
-				staticPDFs,
+				item.AttachmentFields,
+				sharedDocuments,
 				budget,
 			)
 		}
@@ -733,21 +748,14 @@ func (service *CampaignService) executeSend(ctx context.Context, run preparedSen
 			)
 			continue
 		}
+		messageOptions := run.campaign.Campaign.Personalization.Message
+		messageFields := personalizedFields(item.Entry, messageOptions)
+		content := renderMessage(run.campaign.Campaign.Message, messageFields, messageOptions.SubstitutePlaceholders)
+		content.Attachments = item.Attachments
 		message := withSignature(mail.Message{
-			ToEmail: item.Entry.Email,
-			ToName:  personalizedName(item.Entry, item.Fields),
-			MessageContent: mail.MessageContent{
-				Subject: templates.RenderText(run.campaign.Campaign.Message.Subject, item.Fields),
-				Body:    templates.RenderText(run.campaign.Campaign.Message.Body, item.Fields),
-				HTMLBody: func() string {
-					if strings.TrimSpace(run.campaign.Campaign.Message.HTMLBody) == "" {
-						return ""
-					}
-					return templates.RenderHTML(run.campaign.Campaign.Message.HTMLBody, item.Fields)
-				}(),
-				RequestDeliveryNotice: run.campaign.Campaign.Message.RequestDeliveryNotice,
-				Attachments:           item.Attachments,
-			},
+			ToEmail:        item.Entry.Email,
+			ToName:         personalizedName(item.Entry, messageFields),
+			MessageContent: content,
 		})
 		result, attempt, kind, err := service.sendWithRetry(ctx, delivery.ID, run.sender, message, &pacer)
 		releaseCampaignItem(&item, budget, admission)
@@ -806,7 +814,7 @@ func (service *CampaignService) executeSend(ctx context.Context, run preparedSen
 func (service *CampaignService) prepareCampaignItems(
 	ctx context.Context,
 	campaign preparedCampaign,
-	staticPDFs []document.GeneratedPDF,
+	sharedDocuments []document.GeneratedDocument,
 	budget *attachmentBudget,
 	admission chan struct{},
 	ready chan<- campaignItem,
@@ -821,11 +829,11 @@ func (service *CampaignService) prepareCampaignItems(
 		case <-ctx.Done():
 			return
 		}
-		fields := personalizedFields(entry, campaign.Campaign.Personalization)
+		fields := personalizedFields(entry, campaign.Campaign.Personalization.Attachments.PlaceholderOptions)
 		item := campaignItem{
-			Index:  index,
-			Entry:  entry,
-			Fields: fields,
+			Index:            index,
+			Entry:            entry,
+			AttachmentFields: fields,
 		}
 		item.InitiallySuppressed, item.Err = service.suppressions.IsSuppressed(ctx, entry.Email)
 		if item.Err == nil && !item.InitiallySuppressed {
@@ -835,7 +843,7 @@ func (service *CampaignService) prepareCampaignItems(
 				campaign.Campaign.Message.Attachments,
 				campaign.Documents,
 				fields,
-				staticPDFs,
+				sharedDocuments,
 				budget,
 			)
 		}
@@ -906,7 +914,7 @@ func (service *CampaignService) executeGeneration(ctx context.Context, run prepa
 		return
 	}
 	budget := newAttachmentBudget()
-	staticPDFs, sharedBytes, err := prepareSharedAttachments(
+	sharedDocuments, sharedBytes, err := prepareSharedAttachments(
 		ctx,
 		service.converter,
 		run.campaign.Campaign.Message.Attachments,
@@ -937,7 +945,7 @@ func (service *CampaignService) executeGeneration(ctx context.Context, run prepa
 	defer budget.release(sharedBytes)
 	addressEntries := make([]document.CampaignAddressEntry, 0, len(run.campaign.AddressList.Entries))
 	for _, entry := range run.campaign.AddressList.Entries {
-		fields := personalizedFields(entry, run.campaign.Campaign.Personalization)
+		fields := personalizedFields(entry, run.campaign.Campaign.Personalization.Attachments.PlaceholderOptions)
 		addressEntries = append(addressEntries, document.CampaignAddressEntry{
 			Email:       entry.Email,
 			DisplayName: personalizedName(entry, fields),
@@ -953,7 +961,7 @@ func (service *CampaignService) executeGeneration(ctx context.Context, run prepa
 		addressEntries,
 		run.campaign.Documents,
 		archiveStaticAttachments(run.campaign.Campaign.Message.Attachments),
-		staticPDFs,
+		sharedDocuments,
 		func(result document.GenerationResult) error {
 			entry := run.campaign.AddressList.Entries[processedEntries]
 			delivery, createErr := service.execution.CreateDelivery(contextForStatus(ctx), store.MessageDelivery{
@@ -1027,7 +1035,7 @@ func (service *CampaignService) beginExecution(
 		return false
 	}
 	service.markRunning(taskID)
-	if len(campaign.Documents) == 0 {
+	if len(campaign.Documents) == 0 || !campaign.Campaign.Personalization.Attachments.ConvertDOCXToPDF {
 		return true
 	}
 	if _, err := service.converter.ResolveExecutable(); err != nil {
@@ -1176,18 +1184,20 @@ func (service *CampaignService) incrementTaskSkipped(ctx context.Context, taskID
 
 func messagePreview(
 	entry store.AddressEntry,
-	fields map[string]string,
 	message mail.MessageContent,
+	options store.PlaceholderOptions,
 ) MessagePreview {
+	fields := personalizedFields(entry, options)
+	message = renderMessage(message, fields, options.SubstitutePlaceholders)
 	preview := MessagePreview{
 		AddressEntryID: entry.ID,
 		Email:          entry.Email,
 		Name:           personalizedName(entry, fields),
-		Subject:        templates.RenderText(message.Subject, fields),
-		Body:           appendTextFooter(templates.RenderText(message.Body, fields)),
+		Subject:        message.Subject,
+		Body:           appendTextFooter(message.Body),
 	}
 	if strings.TrimSpace(message.HTMLBody) != "" {
-		preview.HTMLBody = appendHTMLFooter(templates.RenderHTML(message.HTMLBody, fields))
+		preview.HTMLBody = appendHTMLFooter(message.HTMLBody)
 	}
 	return preview
 }
@@ -1219,7 +1229,7 @@ func sampleEntries(entries []store.AddressEntry, selectedID int64) []store.Addre
 func neverPopulated(
 	key string,
 	entries []store.AddressEntry,
-	options PersonalizationOptions,
+	options store.PlaceholderOptions,
 ) bool {
 	for _, entry := range entries {
 		if strings.TrimSpace(personalizedFields(entry, options)[key]) != "" {

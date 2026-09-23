@@ -100,6 +100,12 @@ export type MessageContent = {
 };
 
 export type PersonalizationOptions = {
+  message: PlaceholderOptions;
+  attachments: PlaceholderOptions & { convertDocxToPdf: boolean };
+};
+
+export type PlaceholderOptions = {
+  substitutePlaceholders: boolean;
   removeDiacritics: boolean;
   firstNameFormat: string;
   lastNameFormat: string;
@@ -246,7 +252,6 @@ export type CampaignPreflight = {
     htmlBody: string;
     attachments: PreflightAttachment[];
   }>;
-  libreOfficeChecked: boolean;
 };
 
 export type TaskReport = {

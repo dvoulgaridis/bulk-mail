@@ -11,7 +11,7 @@ import (
 
 const (
 	applicationID = 0x424d424d
-	schemaVersion = 1
+	schemaVersion = 3
 )
 
 func Open(path string) (*sql.DB, error) {
@@ -166,10 +166,7 @@ var schemaStatements = []string{
 		body TEXT NOT NULL DEFAULT '',
 		html_body TEXT NOT NULL DEFAULT '',
 		request_delivery_notice INTEGER NOT NULL DEFAULT 0,
-		remove_diacritics INTEGER NOT NULL DEFAULT 0,
-		first_name_format TEXT NOT NULL DEFAULT 'preserve',
-		last_name_format TEXT NOT NULL DEFAULT 'preserve',
-		full_name_format TEXT NOT NULL DEFAULT 'preserve',
+		personalization_json TEXT NOT NULL,
 		created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 	);`,

@@ -33,8 +33,9 @@ type DOCXToPDFConverter struct {
 }
 
 type DOCXInput struct {
-	DocumentID int
-	WriteTo    func(io.Writer) error
+	ConvertToPDF bool
+	DocumentID   int
+	WriteTo      func(io.Writer) error
 }
 
 type ConvertedPDF struct {

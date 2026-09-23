@@ -14,6 +14,7 @@ import type {
   Campaign,
   CampaignPreflight,
   ExecuteCampaignCommand,
+  PlaceholderOptions,
   PreflightCampaignCommand,
   SaveCampaignCommand,
   Task,
@@ -48,7 +49,6 @@ function createCampaignsFeature(
   onTaskQueued: (taskID: number) => void,
 ) {
   const campaign = reactive<Campaign>(newCampaign());
-  const mode = ref<CampaignMode>("send");
   const sampleAddressEntryID = ref(0);
   const preflightResult = ref<CampaignPreflight | null>(null);
   const preflightSignature = ref("");
@@ -61,9 +61,10 @@ function createCampaignsFeature(
   );
   const canRun = computed(
     () =>
-      preflightCurrent.value &&
-      !!preflightResult.value &&
-      (preflightResult.value.confirmation.length === 0 || unresolvedConfirmed.value),
+      !preflightCurrent.value ||
+      !preflightResult.value ||
+      preflightResult.value.confirmation.length === 0 ||
+      unresolvedConfirmed.value,
   );
 
   watch(
@@ -78,7 +79,6 @@ function createCampaignsFeature(
       addressListId: workspace.state.addressLists[0]?.id || 0,
       profileId: workspace.state.smtpProfiles[0]?.id ?? null,
     });
-    mode.value = "send";
     savedSignature = "";
     clearPreflight();
     workspace.navigate("new-campaign");
@@ -89,7 +89,6 @@ function createCampaignsFeature(
     await workspace.runAction(async () => {
       const loaded = await workspace.api.request<Campaign>(`/api/campaigns/${id}`);
       Object.assign(campaign, loaded);
-      mode.value = "send";
       savedSignature = campaignSignature();
       clearPreflight();
       workspace.navigate("new-campaign");
@@ -195,17 +194,17 @@ function createCampaignsFeature(
     clearPreflight();
   }
 
-  function run(): void {
-    if (!preflightCurrent.value || !preflightResult.value) {
-      workspace.notify("Run preflight after the last campaign change.", "error");
-      return;
-    }
-    if (preflightResult.value.confirmation.length > 0 && !unresolvedConfirmed.value) {
+  function run(mode: CampaignMode): void {
+    if (!canRun.value) {
       workspace.notify("Confirm the exact unresolved placeholders before continuing.", "error");
       return;
     }
-    if (mode.value === "generate") void generateDocuments();
-    else void queueCampaign();
+    if (mode === "generate") void generateDocuments();
+    else if (mode === "send") void queueCampaign();
+    else {
+      workspace.notify("Invalid campaign mode.", "error");
+      return;
+    }
   }
 
   async function queueCampaign(): Promise<void> {
@@ -254,7 +253,7 @@ function createCampaignsFeature(
 
   function preflightCommand(): PreflightCampaignCommand {
     return {
-      mode: mode.value,
+      mode: "send",
       addressListId: Number(campaign.addressListId),
       message: {
         ...campaign.message,
@@ -268,7 +267,7 @@ function createCampaignsFeature(
   function executionCommand(campaignID: number): ExecuteCampaignCommand {
     return {
       campaignId: campaignID,
-      confirmedUnresolved: unresolvedConfirmed.value
+      confirmedUnresolved: preflightCurrent.value && unresolvedConfirmed.value
         ? preflightResult.value?.confirmation || []
         : [],
     };
@@ -310,7 +309,6 @@ function createCampaignsFeature(
 
   return {
     campaign,
-    mode,
     sampleAddressEntryID,
     preflightResult,
     preflightCurrent,
@@ -354,12 +352,20 @@ function newCampaign(): Campaign {
       attachments: [],
     },
     personalization: {
-      removeDiacritics: false,
-      firstNameFormat: "preserve",
-      lastNameFormat: "preserve",
-      fullNameFormat: "preserve",
+      message: newPlaceholderOptions(),
+      attachments: { ...newPlaceholderOptions(), convertDocxToPdf: true },
     },
     createdAt: "",
     updatedAt: "",
+  };
+}
+
+function newPlaceholderOptions(): PlaceholderOptions {
+  return {
+    substitutePlaceholders: true,
+    removeDiacritics: false,
+    firstNameFormat: "preserve",
+    lastNameFormat: "preserve",
+    fullNameFormat: "preserve",
   };
 }

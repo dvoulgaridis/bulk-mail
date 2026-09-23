@@ -151,10 +151,21 @@ type AddressEntry struct {
 }
 
 type PersonalizationOptions struct {
-	RemoveDiacritics bool   `json:"removeDiacritics"`
-	FirstNameFormat  string `json:"firstNameFormat"`
-	LastNameFormat   string `json:"lastNameFormat"`
-	FullNameFormat   string `json:"fullNameFormat"`
+	Message     PlaceholderOptions               `json:"message"`
+	Attachments AttachmentPersonalizationOptions `json:"attachments"`
+}
+
+type PlaceholderOptions struct {
+	SubstitutePlaceholders bool   `json:"substitutePlaceholders"`
+	RemoveDiacritics       bool   `json:"removeDiacritics"`
+	FirstNameFormat        string `json:"firstNameFormat"`
+	LastNameFormat         string `json:"lastNameFormat"`
+	FullNameFormat         string `json:"fullNameFormat"`
+}
+
+type AttachmentPersonalizationOptions struct {
+	PlaceholderOptions
+	ConvertDOCXToPDF bool `json:"convertDocxToPdf"`
 }
 
 type Campaign struct {

@@ -3,12 +3,12 @@ import { computed } from "vue";
 import { useWorkspace } from "../../app/context";
 import { placeholderToken } from "../../common/format";
 import AttachmentPicker from "../attachments/AttachmentPicker.vue";
+import PersonalizationOptions from "./PersonalizationOptions.vue";
 import { useCampaignsFeature } from "./useCampaigns";
 
 const { state } = useWorkspace();
 const {
   campaign,
-  mode,
   sampleAddressEntryID,
   preflightResult,
   preflightCurrent,
@@ -44,27 +44,10 @@ function sandboxedHTML(html: string): string {
 
 <template>
   <section class="bulk-mail-section">
-    <form class="app-form bulk-mail-form" @submit.prevent="run">
+    <form class="app-form bulk-mail-form" @submit.prevent="run('send')">
       <fieldset class="bulk-mail-fieldset">
-        <legend>Campaign setup</legend>
         <div class="app-form-two-up">
           <label class="app-form-field">
-            <span>Workflow</span>
-            <select v-model="mode">
-              <option value="send">Send personalized email</option>
-              <option value="generate">Generate documents only</option>
-            </select>
-          </label>
-          <label class="app-form-field">
-            <span>Address list</span>
-            <select v-model.number="campaign.addressListId" required>
-              <option :value="0">Select address list</option>
-              <option v-for="list in state.addressLists" :key="list.id" :value="list.id">
-                {{ list.name }} ({{ list.count }})
-              </option>
-            </select>
-          </label>
-          <label v-if="mode === 'send'" class="app-form-field">
             <span>Profile</span>
             <select v-model.number="campaign.profileId" required>
               <option :value="null">Select profile</option>
@@ -74,6 +57,15 @@ function sandboxedHTML(html: string): string {
                 :value="profile.id"
               >
                 {{ profile.name }} [{{ transportLabel(profile) }}]
+              </option>
+            </select>
+          </label>
+          <label class="app-form-field">
+            <span>Address list</span>
+            <select v-model.number="campaign.addressListId" required>
+              <option :value="0">Select address list</option>
+              <option v-for="list in state.addressLists" :key="list.id" :value="list.id">
+                {{ list.name }} ({{ list.count }})
               </option>
             </select>
           </label>
@@ -93,10 +85,9 @@ function sandboxedHTML(html: string): string {
         </label>
       </fieldset>
 
-      <fieldset v-if="mode === 'send'" class="bulk-mail-fieldset">
-        <legend>Message</legend>
+      <fieldset class="bulk-mail-fieldset">
         <label class="app-form-field">
-          <span>Subject template</span>
+          <span>Subject</span>
           <input v-model="campaign.message.subject" type="text" required />
         </label>
         <label class="app-form-field">
@@ -111,6 +102,7 @@ function sandboxedHTML(html: string): string {
             placeholder="&lt;p&gt;Hello {{first_name}}&lt;/p&gt;"
           ></textarea>
         </label>
+        <PersonalizationOptions :options="campaign.personalization.message" />
       </fieldset>
 
       <div class="app-form-field bulk-mail-placeholders">
@@ -125,46 +117,11 @@ function sandboxedHTML(html: string): string {
       <AttachmentPicker />
 
       <fieldset class="bulk-mail-fieldset">
-        <legend>Personalization</legend>
-        <label class="app-checkbox-field">
-          <input v-model="campaign.personalization.removeDiacritics" type="checkbox" />
-          <span>Remove diacritics from generated values</span>
-        </label>
-        <div class="app-form-three-up">
-          <label class="app-form-field">
-            <span>First name format</span>
-            <select v-model="campaign.personalization.firstNameFormat">
-              <option value="preserve">Preserve</option>
-              <option value="upper">Uppercase</option>
-              <option value="title">Title case</option>
-            </select>
-          </label>
-          <label class="app-form-field">
-            <span>Last name format</span>
-            <select v-model="campaign.personalization.lastNameFormat">
-              <option value="preserve">Preserve</option>
-              <option value="upper">Uppercase</option>
-              <option value="title">Title case</option>
-            </select>
-          </label>
-          <label class="app-form-field">
-            <span>Full name format</span>
-            <select v-model="campaign.personalization.fullNameFormat">
-              <option value="preserve">Preserve</option>
-              <option value="upper">Uppercase</option>
-              <option value="title">Title case</option>
-            </select>
-          </label>
-        </div>
-      </fieldset>
-
-      <fieldset v-if="mode === 'send'" class="bulk-mail-fieldset">
         <legend>Delivery notices</legend>
         <label class="app-checkbox-field">
           <input v-model="campaign.message.requestDeliveryNotice" type="checkbox" />
           <span>Request delivery/read receipt</span>
         </label>
-        <p class="app-form-help">Mail providers and recipients may ignore this request.</p>
       </fieldset>
 
       <div class="app-stage-actions">
@@ -172,15 +129,18 @@ function sandboxedHTML(html: string): string {
           Delete
         </button>
         <button type="button" @click="saveCampaign">Save</button>
-        <button type="button" @click="runPreflight">Run preflight</button>
+        <button type="button" @click="runPreflight">Preview</button>
+        <button type="button" :disabled="!canRun" @click="run('generate')">
+          Generate only
+        </button>
         <button type="submit" class="is-primary" :disabled="!canRun">
-          {{ mode === "generate" ? "Queue generation" : "Queue campaign" }}
+          Queue campaign
         </button>
       </div>
       <section v-if="preflightResult && preflightCurrent" class="bulk-mail-preview-panel">
         <div class="bulk-mail-section-head">
           <div>
-            <h3>Preflight</h3>
+            <h3>Preview</h3>
             <p>
               {{ preflightResult.count }} address entries ·
               {{ preflightResult.attachments.length }} attachments
@@ -197,6 +157,9 @@ function sandboxedHTML(html: string): string {
                   ? item.placeholders.map(placeholderToken).join(", ")
                   : "Converted to PDF without personalization"
               }}
+            </span>
+            <span v-else-if="item.placeholders.length">
+              {{ item.placeholders.map(placeholderToken).join(", ") }}
             </span>
             <span v-else>Attached unchanged</span>
           </div>
@@ -230,7 +193,7 @@ function sandboxedHTML(html: string): string {
             <strong>{{ sample.name || sample.email }}</strong>
             <span>{{ sample.email }}</span>
           </div>
-          <div v-if="mode === 'send'" class="bulk-mail-preview-message">
+          <div class="bulk-mail-preview-message">
             <strong>{{ sample.subject }}</strong>
             <pre>{{ sample.body }}</pre>
             <iframe

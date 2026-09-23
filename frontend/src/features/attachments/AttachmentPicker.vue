@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useTemplateRef } from "vue";
 import { useCampaignsFeature } from "../campaigns/useCampaigns";
+import PersonalizationOptions from "../campaigns/PersonalizationOptions.vue";
 
 const {
   campaign,
@@ -26,10 +27,12 @@ const fileInput = useTemplateRef<HTMLInputElement>("fileInput");
     <div class="app-stage-actions app-stage-actions--start">
       <button type="button" @click="fileInput?.click()">Browse</button>
     </div>
-    <p class="app-form-help">
-      * DOCX files support placeholders and are converted to PDF; other files
-      are attached unchanged
-    </p>
+    <PersonalizationOptions :options="campaign.personalization.attachments">
+      <label class="app-checkbox-field">
+        <input v-model="campaign.personalization.attachments.convertDocxToPdf" type="checkbox" />
+        <span>Convert DOCX to PDF</span>
+      </label>
+    </PersonalizationOptions>
     <div
       v-if="campaign.message.attachments.length > 0"
       class="bulk-mail-attachment-list"
@@ -43,7 +46,10 @@ const fileInput = useTemplateRef<HTMLInputElement>("fileInput");
           <strong>{{ attachment.filename }}</strong>
           <small>{{ formatFileSize(attachment.size) }}</small>
         </div>
-        <label v-if="isDOCXAttachment(attachment)" class="app-form-field">
+        <label
+          v-if="isDOCXAttachment(attachment) && campaign.personalization.attachments.convertDocxToPdf"
+          class="app-form-field"
+        >
           <span>Generated PDF filename</span>
           <input v-model="attachment.outputFilename" type="text" required />
         </label>

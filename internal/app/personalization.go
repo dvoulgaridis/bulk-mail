@@ -5,20 +5,22 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/dvoulgaridis/bulk-mail/internal/mail"
 	"github.com/dvoulgaridis/bulk-mail/internal/store"
+	"github.com/dvoulgaridis/bulk-mail/internal/templates"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 	"golang.org/x/text/unicode/norm"
 )
 
-type PersonalizationOptions = store.PersonalizationOptions
-
-func validatePersonalization(options PersonalizationOptions) error {
-	for _, value := range []string{options.FirstNameFormat, options.LastNameFormat, options.FullNameFormat} {
-		switch normalizedFormat(value) {
-		case "preserve", "upper", "title":
-		default:
-			return failure(ErrorValidation, "name format must be preserve, upper, or title", nil)
+func validatePersonalization(options store.PersonalizationOptions) error {
+	for _, group := range []store.PlaceholderOptions{options.Message, options.Attachments.PlaceholderOptions} {
+		for _, value := range []string{group.FirstNameFormat, group.LastNameFormat, group.FullNameFormat} {
+			switch normalizedFormat(value) {
+			case "preserve", "upper", "title":
+			default:
+				return failure(ErrorValidation, "name format must be preserve, upper, or title", nil)
+			}
 		}
 	}
 	return nil
@@ -26,34 +28,41 @@ func validatePersonalization(options PersonalizationOptions) error {
 
 func personalizedFields(
 	entry store.AddressEntry,
-	options PersonalizationOptions,
+	options store.PlaceholderOptions,
 ) map[string]string {
-	firstName := formatName(
-		cleanPersonalizedValue(
-			entry.Fields[string(store.AddressFieldRoleFirstName)],
-			options.RemoveDiacritics,
-		),
-		options.FirstNameFormat,
+	firstName := cleanPersonalizedValue(
+		entry.Fields[string(store.AddressFieldRoleFirstName)],
+		options.RemoveDiacritics,
 	)
-	lastName := formatName(
-		cleanPersonalizedValue(
-			entry.Fields[string(store.AddressFieldRoleLastName)],
-			options.RemoveDiacritics,
-		),
-		options.LastNameFormat,
+	lastName := cleanPersonalizedValue(
+		entry.Fields[string(store.AddressFieldRoleLastName)],
+		options.RemoveDiacritics,
 	)
 	fields := maps.Clone(entry.Fields)
 	if fields == nil {
 		fields = make(store.AddressFields)
 	}
 	fields[string(store.AddressFieldRoleEmail)] = strings.TrimSpace(entry.Email)
-	fields[string(store.AddressFieldRoleFirstName)] = firstName
-	fields[string(store.AddressFieldRoleLastName)] = lastName
+	fields[string(store.AddressFieldRoleFirstName)] = formatName(firstName, options.FirstNameFormat)
+	fields[string(store.AddressFieldRoleLastName)] = formatName(lastName, options.LastNameFormat)
 	fields["full_name"] = formatName(
 		strings.TrimSpace(strings.Join([]string{firstName, lastName}, " ")),
 		options.FullNameFormat,
 	)
 	return fields
+}
+
+// renderMessage is shared by preview and delivery. Attachment processing is independent.
+func renderMessage(message mail.MessageContent, fields map[string]string, substitute bool) mail.MessageContent {
+	if substitute {
+		message.Subject = templates.RenderText(message.Subject, fields)
+		message.Body = templates.RenderText(message.Body, fields)
+		message.HTMLBody = templates.RenderHTML(message.HTMLBody, fields)
+	}
+	if strings.TrimSpace(message.HTMLBody) == "" {
+		message.HTMLBody = ""
+	}
+	return message
 }
 
 func personalizedName(entry store.AddressEntry, fields map[string]string) string {

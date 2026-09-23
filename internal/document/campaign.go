@@ -30,7 +30,7 @@ type CampaignAddressEntry struct {
 	Values      map[string]string
 }
 
-type GeneratedPDF struct {
+type GeneratedDocument struct {
 	DocumentID int
 	Content    []byte
 }
@@ -47,14 +47,18 @@ type GenerationResult struct {
 	Files  []string
 }
 
-func ReadConvertedPDFs(converted []ConvertedPDF) ([]GeneratedPDF, error) {
-	documents := make([]GeneratedPDF, 0, len(converted))
+func ReadPreparedDocuments(converted []PreparedDocument) ([]GeneratedDocument, error) {
+	documents := make([]GeneratedDocument, 0, len(converted))
 	for _, item := range converted {
-		content, err := os.ReadFile(item.Path)
-		if err != nil {
-			return nil, err
+		content := item.Content
+		if item.Path != "" {
+			var err error
+			content, err = os.ReadFile(item.Path)
+			if err != nil {
+				return nil, err
+			}
 		}
-		documents = append(documents, GeneratedPDF{DocumentID: item.DocumentID, Content: content})
+		documents = append(documents, GeneratedDocument{DocumentID: item.DocumentID, Content: content})
 	}
 	return documents, nil
 }
@@ -63,11 +67,18 @@ func ResolveOutputFilenames(inputs []CampaignTemplate, values map[string]string)
 	used := map[string]bool{}
 	names := make([]string, 0, len(inputs))
 	for _, input := range inputs {
+		if !input.ConvertToPDF {
+			names = append(names, uniqueFilename(SanitizeFilename(input.Filename), used))
+			continue
+		}
 		template := strings.TrimSpace(input.OutputFilename)
 		if template == "" {
 			template = pdfFilename(input.Filename)
 		}
-		name := ensurePDFExtension(SanitizeFilename(templates.RenderText(template, values)))
+		if input.SubstitutePlaceholders {
+			template = templates.RenderText(template, values)
+		}
+		name := ensurePDFExtension(SanitizeFilename(template))
 		if name == ".pdf" {
 			name = "document.pdf"
 		}
@@ -83,7 +94,7 @@ func GenerateCampaignArchive(
 	addressEntries []CampaignAddressEntry,
 	inputs []CampaignTemplate,
 	staticAttachments []StaticAttachment,
-	staticPDFs []GeneratedPDF,
+	sharedDocuments []GeneratedDocument,
 	onResult func(GenerationResult) error,
 ) (func(), error) {
 	cleanup := func() { _ = os.Remove(archivePath) }
@@ -113,11 +124,11 @@ func GenerateCampaignArchive(
 	}
 	var generatedAttachmentBytes int64
 	archiveLimitReached := false
-	staticByID := make(map[int]GeneratedPDF, len(staticPDFs))
-	for _, item := range staticPDFs {
+	staticByID := make(map[int]GeneratedDocument, len(sharedDocuments))
+	for _, item := range sharedDocuments {
 		staticByID[item.DocumentID] = item
 	}
-	staticBytes := generatedPDFSize(staticPDFs) + staticAttachmentSize(staticAttachments)
+	staticBytes := generatedDocumentSize(sharedDocuments) + staticAttachmentSize(staticAttachments)
 	for entryIndex, entry := range addressEntries {
 		if err := ctx.Err(); err != nil {
 			_ = zipWriter.Close()
@@ -134,12 +145,12 @@ func GenerateCampaignArchive(
 			result.Error = archiveLimitError
 		} else {
 			var writeErr error
-			renderErr := converter.ConvertBatch(
-				ctx,
+			renderErr := PrepareBatch(
+				ctx, converter,
 				PersonalizedDOCX(inputs, entry.Values),
-				func(converted []ConvertedPDF) error {
+				func(converted []PreparedDocument) error {
 					outputNames := ResolveOutputFilenames(inputs, entry.Values)
-					convertedByID := make(map[int]ConvertedPDF, len(converted))
+					convertedByID := make(map[int]PreparedDocument, len(converted))
 					for _, item := range converted {
 						convertedByID[item.DocumentID] = item
 					}
@@ -158,9 +169,13 @@ func GenerateCampaignArchive(
 						if item, ok := staticByID[documentID]; ok {
 							writeErr = writeZipFile(zipWriter, entryName, item.Content)
 						} else if item, ok := convertedByID[documentID]; ok {
-							writeErr = writeZipPath(zipWriter, entryName, item.Path)
+							if item.Path == "" {
+								writeErr = writeZipFile(zipWriter, entryName, item.Content)
+							} else {
+								writeErr = writeZipPath(zipWriter, entryName, item.Path)
+							}
 						} else {
-							writeErr = fmt.Errorf("document %d has no converted PDF", documentID)
+							writeErr = fmt.Errorf("document %d has no prepared output", documentID)
 						}
 						if writeErr != nil {
 							return writeErr
@@ -238,7 +253,7 @@ func GenerateCampaignArchive(
 	return cleanup, nil
 }
 
-func generatedPDFSize(documents []GeneratedPDF) int64 {
+func generatedDocumentSize(documents []GeneratedDocument) int64 {
 	var total int64
 	for _, document := range documents {
 		total += int64(len(document.Content))

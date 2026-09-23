@@ -123,39 +123,42 @@ func prepareSharedAttachments(
 	attachments []mail.Attachment,
 	documents []document.CampaignTemplate,
 	budget *attachmentBudget,
-) ([]document.GeneratedPDF, int64, error) {
+) ([]document.GeneratedDocument, int64, error) {
 	reserved := staticAttachmentBytes(attachments)
 	if err := budget.acquire(ctx, reserved); err != nil {
 		return nil, 0, err
 	}
-	staticPDFs, convertedBytes, err := prepareStaticPDFs(ctx, converter, documents, budget)
+	sharedDocuments, convertedBytes, err := prepareStaticDocuments(ctx, converter, documents, budget)
 	if err != nil {
 		budget.release(reserved)
 		return nil, 0, err
 	}
-	return staticPDFs, reserved + convertedBytes, nil
+	return sharedDocuments, reserved + convertedBytes, nil
 }
 
-func prepareStaticPDFs(
+func prepareStaticDocuments(
 	ctx context.Context,
 	converter document.DOCXToPDFConverter,
 	inputs []document.CampaignTemplate,
 	budget *attachmentBudget,
-) ([]document.GeneratedPDF, int64, error) {
-	var result []document.GeneratedPDF
+) ([]document.GeneratedDocument, int64, error) {
+	var result []document.GeneratedDocument
 	var reserved int64
-	err := converter.ConvertBatch(ctx, document.StaticDOCX(inputs), func(converted []document.ConvertedPDF) error {
-		for _, item := range converted {
-			reserved += item.Size
-		}
-		if err := budget.acquire(ctx, reserved); err != nil {
-			reserved = 0
+	err := document.PrepareBatch(
+		ctx, converter, document.StaticDOCX(inputs),
+		func(prepared []document.PreparedDocument) error {
+			for _, item := range prepared {
+				reserved += item.Size
+			}
+			if err := budget.acquire(ctx, reserved); err != nil {
+				reserved = 0
+				return err
+			}
+			var err error
+			result, err = document.ReadPreparedDocuments(prepared)
 			return err
-		}
-		var err error
-		result, err = document.ReadConvertedPDFs(converted)
-		return err
-	})
+		},
+	)
 	if err != nil {
 		budget.release(reserved)
 		return nil, 0, err
@@ -169,22 +172,22 @@ func prepareAddressEntryAttachments(
 	attachmentInputs []mail.Attachment,
 	documents []document.CampaignTemplate,
 	fields map[string]string,
-	staticPDFs []document.GeneratedPDF,
+	sharedDocuments []document.GeneratedDocument,
 	budget *attachmentBudget,
 ) ([]mail.Attachment, int64, error) {
-	var personalized []document.GeneratedPDF
+	var personalized []document.GeneratedDocument
 	var reservedBytes int64
-	err := converter.ConvertBatch(
-		ctx,
+	err := document.PrepareBatch(
+		ctx, converter,
 		document.PersonalizedDOCX(documents, fields),
-		func(converted []document.ConvertedPDF) error {
-			convertedBytes := convertedPDFBytes(converted)
+		func(converted []document.PreparedDocument) error {
+			convertedBytes := preparedDocumentBytes(converted)
 			if err := budget.acquire(ctx, convertedBytes); err != nil {
 				return err
 			}
 			reservedBytes = convertedBytes
 			var err error
-			personalized, err = document.ReadConvertedPDFs(converted)
+			personalized, err = document.ReadPreparedDocuments(converted)
 			return err
 		},
 	)
@@ -192,8 +195,8 @@ func prepareAddressEntryAttachments(
 		budget.release(reservedBytes)
 		return nil, 0, err
 	}
-	byID := make(map[int]document.GeneratedPDF, len(staticPDFs)+len(personalized))
-	for _, item := range staticPDFs {
+	byID := make(map[int]document.GeneratedDocument, len(sharedDocuments)+len(personalized))
+	for _, item := range sharedDocuments {
 		byID[item.DocumentID] = item
 	}
 	for _, item := range personalized {
@@ -216,11 +219,11 @@ func prepareAddressEntryAttachments(
 		item, ok := byID[documentID]
 		if !ok {
 			budget.release(reservedBytes)
-			return nil, 0, fmt.Errorf("document %d has no converted PDF", documentID)
+			return nil, 0, fmt.Errorf("document %d has no prepared output", documentID)
 		}
 		attachments = append(attachments, mail.Attachment{
 			Filename:    uniqueAttachmentFilename(outputNames[documentID], usedNames),
-			ContentType: "application/pdf",
+			ContentType: attachmentContentType(outputNames[documentID], item.Content),
 			Size:        len(item.Content),
 			Content:     item.Content,
 		})
@@ -239,7 +242,7 @@ func staticAttachmentBytes(attachments []mail.Attachment) int64 {
 	return total
 }
 
-func convertedPDFBytes(documents []document.ConvertedPDF) int64 {
+func preparedDocumentBytes(documents []document.PreparedDocument) int64 {
 	var total int64
 	for _, item := range documents {
 		total += item.Size

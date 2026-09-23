@@ -1278,6 +1278,11 @@ func (s *Store) SaveCampaign(ctx context.Context, campaign Campaign) (Campaign, 
 	if campaign.ID != NewCampaignID && campaign.ID <= 0 {
 		return Campaign{}, errors.New("campaign id must be -1 or positive")
 	}
+	personalization, err := json.Marshal(campaign.Personalization)
+	if err != nil {
+		return Campaign{}, err
+	}
+	values := campaignValues(campaign, string(personalization))
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return Campaign{}, err
@@ -1287,10 +1292,9 @@ func (s *Store) SaveCampaign(ctx context.Context, campaign Campaign) (Campaign, 
 		result, err := tx.ExecContext(ctx, `
 			INSERT INTO campaigns (
 				name, address_list_id, profile_id, subject, body, html_body,
-				request_delivery_notice, remove_diacritics,
-				first_name_format, last_name_format, full_name_format
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`, campaignValues(campaign)...)
+				request_delivery_notice, personalization_json
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		`, values...)
 		if err != nil {
 			return Campaign{}, err
 		}
@@ -1299,12 +1303,11 @@ func (s *Store) SaveCampaign(ctx context.Context, campaign Campaign) (Campaign, 
 			return Campaign{}, err
 		}
 	} else {
-		values := append(campaignValues(campaign), campaign.ID)
+		values = append(values, campaign.ID)
 		result, err := tx.ExecContext(ctx, `
 			UPDATE campaigns SET
 				name = ?, address_list_id = ?, profile_id = ?, subject = ?, body = ?, html_body = ?,
-				request_delivery_notice = ?, remove_diacritics = ?,
-				first_name_format = ?, last_name_format = ?, full_name_format = ?,
+				request_delivery_notice = ?, personalization_json = ?,
 				updated_at = CURRENT_TIMESTAMP
 			WHERE id = ?
 		`, values...)
@@ -1345,7 +1348,7 @@ func (s *Store) SaveCampaign(ctx context.Context, campaign Campaign) (Campaign, 
 	return saved, nil
 }
 
-func campaignValues(campaign Campaign) []any {
+func campaignValues(campaign Campaign, personalization string) []any {
 	return []any{
 		campaign.Name,
 		nullableID(campaign.AddressListID),
@@ -1354,10 +1357,7 @@ func campaignValues(campaign Campaign) []any {
 		campaign.Message.Body,
 		campaign.Message.HTMLBody,
 		campaign.Message.RequestDeliveryNotice,
-		campaign.Personalization.RemoveDiacritics,
-		campaign.Personalization.FirstNameFormat,
-		campaign.Personalization.LastNameFormat,
-		campaign.Personalization.FullNameFormat,
+		personalization,
 	}
 }
 
@@ -1434,8 +1434,8 @@ func (s *Store) DeleteCampaign(ctx context.Context, id int64) error {
 
 const campaignSelect = `
 	SELECT id, name, COALESCE(address_list_id, 0), profile_id,
-	       subject, body, html_body, request_delivery_notice, remove_diacritics,
-	       first_name_format, last_name_format, full_name_format, created_at, updated_at
+	       subject, body, html_body, request_delivery_notice,
+	       personalization_json, created_at, updated_at
 	FROM campaigns`
 
 type campaignQueryer interface {
@@ -1458,6 +1458,7 @@ func getCampaign(ctx context.Context, queryer campaignQueryer, id int64, include
 
 func scanCampaign(scanner campaignScanner) (Campaign, error) {
 	var campaign Campaign
+	var personalization string
 	err := scanner.Scan(
 		&campaign.ID,
 		&campaign.Name,
@@ -1467,13 +1468,13 @@ func scanCampaign(scanner campaignScanner) (Campaign, error) {
 		&campaign.Message.Body,
 		&campaign.Message.HTMLBody,
 		&campaign.Message.RequestDeliveryNotice,
-		&campaign.Personalization.RemoveDiacritics,
-		&campaign.Personalization.FirstNameFormat,
-		&campaign.Personalization.LastNameFormat,
-		&campaign.Personalization.FullNameFormat,
+		&personalization,
 		&campaign.CreatedAt,
 		&campaign.UpdatedAt,
 	)
+	if err == nil {
+		err = json.Unmarshal([]byte(personalization), &campaign.Personalization)
+	}
 	return campaign, err
 }
 
