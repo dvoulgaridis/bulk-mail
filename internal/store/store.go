@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/dvoulgaridis/bulk-mail/internal/mail"
 	taskpkg "github.com/dvoulgaridis/bulk-mail/internal/tasks"
@@ -20,7 +21,8 @@ import (
 // Store construction and application state.
 
 type Store struct {
-	db *sql.DB
+	db          *sql.DB
+	entryWrites sync.Mutex
 }
 
 var (
@@ -500,139 +502,66 @@ func (s *Store) GetProfileCredential(
 
 // Address lists, field definitions, and entries.
 
-func (s *Store) CreateAddressList(
-	ctx context.Context,
-	name string,
-	source string,
-	notes string,
-	definitions []AddressFieldDefinition,
-	entries []AddressEntry,
-) (AddressList, error) {
-	definitions, err := normalizeAddressFieldDefinitions(definitions)
+// SaveAddressList changes metadata only; entry writes have independent outcomes.
+func (s *Store) SaveAddressList(ctx context.Context, list AddressList) (AddressList, error) {
+	fields, err := normalizeAddressFieldDefinitions(list.Fields)
 	if err != nil {
 		return AddressList{}, err
 	}
-	name = strings.TrimSpace(name)
-	if name == "" {
-		name = "Imported addresses"
-	}
-	source = strings.TrimSpace(source)
-	if source == "" {
-		source = "manual"
-	}
-	notes, err = validation.TrimField(notes, "notes")
-	if err != nil {
-		return AddressList{}, err
-	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return AddressList{}, err
-	}
-	defer tx.Rollback()
-
-	res, err := tx.ExecContext(
-		ctx,
-		`INSERT INTO address_lists (name, source, notes) VALUES (?, ?, ?)`,
-		name,
-		source,
-		notes,
-	)
-	if err != nil {
-		return AddressList{}, err
-	}
-	listID, err := res.LastInsertId()
-	if err != nil {
-		return AddressList{}, err
-	}
-	if err := insertAddressFields(ctx, tx, listID, definitions); err != nil {
-		return AddressList{}, err
-	}
-	if err := insertEntries(ctx, tx, listID, definitions, entries); err != nil {
-		return AddressList{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return AddressList{}, err
-	}
-	return s.GetAddressList(ctx, listID)
-}
-
-func (s *Store) ReplaceAddressList(
-	ctx context.Context,
-	id int64,
-	name string,
-	source string,
-	notes string,
-	definitions []AddressFieldDefinition,
-	entries []AddressEntry,
-) (AddressList, error) {
-	incomingDefinitions, err := normalizeAddressFieldDefinitions(definitions)
-	if err != nil {
-		return AddressList{}, err
-	}
-	name = strings.TrimSpace(name)
-	if name == "" {
+	list.Name = strings.TrimSpace(list.Name)
+	if list.Name == "" {
 		return AddressList{}, errors.New("address list name is required")
 	}
-	source = strings.TrimSpace(source)
-	if source == "" {
-		source = "manual"
-	}
-	notes, err = validation.TrimField(notes, "notes")
+	list.Notes, err = validation.TrimField(list.Notes, "notes")
 	if err != nil {
 		return AddressList{}, err
+	}
+	if list.Source == "" {
+		list.Source = "manual"
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return AddressList{}, err
 	}
 	defer tx.Rollback()
-	storedFields, err := readAddressFields(ctx, tx, []int64{id})
-	if err != nil {
-		return AddressList{}, err
+	if list.ID == 0 {
+		res, err := tx.ExecContext(ctx, "INSERT INTO address_lists (name, source, notes) VALUES (?, ?, ?)",
+			list.Name, list.Source, list.Notes)
+		if err != nil {
+			return AddressList{}, err
+		}
+		list.ID, err = res.LastInsertId()
+		if err != nil {
+			return AddressList{}, err
+		}
+	} else {
+		stored, err := readAddressFields(ctx, tx, []int64{list.ID})
+		if err != nil {
+			return AddressList{}, err
+		}
+		if _, exists := stored[list.ID]; !exists {
+			return AddressList{}, sql.ErrNoRows
+		}
+		fields, err = mergeAddressFieldDefinitions(stored[list.ID], fields)
+		if err != nil {
+			return AddressList{}, err
+		}
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE address_lists SET name = ?, source = ?, notes = ?,
+			updated_at = CURRENT_TIMESTAMP WHERE id = ?`, list.Name, list.Source, list.Notes, list.ID); err != nil {
+			return AddressList{}, err
+		}
+		if _, err := tx.ExecContext(ctx, "DELETE FROM address_list_fields WHERE address_list_id = ?", list.ID); err != nil {
+			return AddressList{}, err
+		}
 	}
-	definitions, err = mergeAddressFieldDefinitions(storedFields[id], incomingDefinitions)
-	if err != nil {
-		return AddressList{}, err
-	}
-	res, err := tx.ExecContext(ctx, `
-		UPDATE address_lists
-		SET name = ?, source = ?, notes = ?, updated_at = CURRENT_TIMESTAMP
-		WHERE id = ?
-	`, name, source, notes, id)
-	if err != nil {
-		return AddressList{}, err
-	}
-	affected, err := res.RowsAffected()
-	if err != nil {
-		return AddressList{}, err
-	}
-	if affected == 0 {
-		return AddressList{}, sql.ErrNoRows
-	}
-	if _, err := tx.ExecContext(
-		ctx,
-		`DELETE FROM address_list_entries WHERE address_list_id = ?`,
-		id,
-	); err != nil {
-		return AddressList{}, err
-	}
-	if _, err := tx.ExecContext(
-		ctx,
-		`DELETE FROM address_list_fields WHERE address_list_id = ?`,
-		id,
-	); err != nil {
-		return AddressList{}, err
-	}
-	if err := insertAddressFields(ctx, tx, id, definitions); err != nil {
-		return AddressList{}, err
-	}
-	if err := insertEntries(ctx, tx, id, definitions, entries); err != nil {
+	if err := insertAddressFields(ctx, tx, list.ID, fields); err != nil {
 		return AddressList{}, err
 	}
 	if err := tx.Commit(); err != nil {
 		return AddressList{}, err
 	}
-	return s.GetAddressList(ctx, id)
+	return AddressList{ID: list.ID}, nil
 }
 
 func (s *Store) DeleteAddressList(ctx context.Context, id int64) error {
@@ -668,9 +597,9 @@ func (s *Store) DeleteAddressList(ctx context.Context, id int64) error {
 
 func (s *Store) ListAddressLists(ctx context.Context) ([]AddressList, error) {
 	rows, err := s.db.QueryContext(ctx, `
-				SELECT l.id, l.name, l.source, l.notes, COUNT(e.id) AS count, l.created_at, l.updated_at
-				FROM address_lists l
-			LEFT JOIN address_list_entries e ON e.address_list_id = l.id
+		SELECT l.id, l.name, l.source, l.notes, COUNT(e.id) AS count, l.created_at, l.updated_at
+		FROM address_lists l
+		LEFT JOIN address_list_entries e ON e.address_list_id = l.id
 		GROUP BY l.id
 		ORDER BY l.updated_at DESC, l.id DESC
 	`)
@@ -716,35 +645,43 @@ func (s *Store) ListAddressLists(ctx context.Context) ([]AddressList, error) {
 }
 
 func (s *Store) GetAddressList(ctx context.Context, id int64) (AddressList, error) {
-	var list AddressList
-	err := s.db.QueryRowContext(ctx, `
-				SELECT l.id, l.name, l.source, l.notes, COUNT(e.id) AS count, l.created_at, l.updated_at
-				FROM address_lists l
-		LEFT JOIN address_list_entries e ON e.address_list_id = l.id
-		WHERE l.id = ?
-		GROUP BY l.id
-	`, id).Scan(&list.ID, &list.Name, &list.Source, &list.Notes, &list.Count, &list.CreatedAt, &list.UpdatedAt)
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return AddressList{}, err
 	}
-	fieldsByList, err := readAddressFields(ctx, s.db, []int64{id})
+	defer tx.Rollback()
+	var list AddressList
+	err = tx.QueryRowContext(ctx, `
+		SELECT l.id, l.name, l.source, l.notes, COUNT(e.id) AS count, l.created_at, l.updated_at
+		FROM address_lists l
+		LEFT JOIN address_list_entries e ON e.address_list_id = l.id
+		WHERE l.id = ?
+		GROUP BY l.id
+	`, id).Scan(
+		&list.ID, &list.Name, &list.Source,
+		&list.Notes, &list.Count, &list.CreatedAt, &list.UpdatedAt,
+	)
+	if err != nil {
+		return AddressList{}, err
+	}
+	fieldsByList, err := readAddressFields(ctx, tx, []int64{id})
 	if err != nil {
 		return AddressList{}, err
 	}
 	list.Fields = fieldsByList[id]
-	list.Entries, err = s.listAddressEntries(ctx, id, list.Fields)
+	list.Entries, err = readAddressEntries(ctx, tx, id)
 	if err != nil {
 		return AddressList{}, err
 	}
-	return list, nil
+	return list, tx.Commit()
 }
 
-func (s *Store) listAddressEntries(
+func readAddressEntries(
 	ctx context.Context,
+	querier rowQuerier,
 	listID int64,
-	definitions []AddressFieldDefinition,
 ) ([]AddressEntry, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := querier.QueryContext(ctx, `
 		SELECT id, email, fields_json
 		FROM address_list_entries
 		WHERE address_list_id = ?
@@ -758,17 +695,18 @@ func (s *Store) listAddressEntries(
 	var entries []AddressEntry
 	for rows.Next() {
 		var entry AddressEntry
-		var fieldsJSON string
-		if err := rows.Scan(&entry.ID, &entry.Email, &fieldsJSON); err != nil {
+		var fieldsJSON, email string
+		if err := rows.Scan(&entry.ID, &email, &fieldsJSON); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal([]byte(fieldsJSON), &entry.Fields); err != nil {
 			return nil, err
 		}
-		entry, err = normalizeAddressEntry(entry, definitions)
-		if err != nil {
-			return nil, fmt.Errorf("normalize address entry %d: %w", entry.ID, err)
+		if entry.Fields == nil {
+			entry.Fields = AddressFields{}
 		}
+		entry.Fields["email"] = email
+		setAddressEntryDisplayName(&entry)
 		entries = append(entries, entry)
 	}
 	return entries, rows.Err()
@@ -942,52 +880,7 @@ func insertAddressFields(ctx context.Context, tx txExecutor, listID int64, defin
 	return nil
 }
 
-func insertEntries(
-	ctx context.Context,
-	tx txExecutor,
-	listID int64,
-	definitions []AddressFieldDefinition,
-	entries []AddressEntry,
-) error {
-	seen := map[string]bool{}
-	for index, entry := range entries {
-		entry, err := normalizeAddressEntry(entry, definitions)
-		if err != nil {
-			return fmt.Errorf("address entry %d: %w", index+1, err)
-		}
-		if seen[entry.Email] {
-			return fmt.Errorf("address entry %d: duplicate email %q", index+1, entry.Email)
-		}
-		seen[entry.Email] = true
-		fieldsJSON, err := json.Marshal(entry.Fields)
-		if err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO address_list_entries (address_list_id, email, fields_json)
-			VALUES (?, ?, ?)
-		`, listID, entry.Email, string(fieldsJSON)); err != nil {
-			return fmt.Errorf("address entry %d: %w", index+1, err)
-		}
-	}
-	return nil
-}
-
-func normalizeAddressEntry(
-	entry AddressEntry,
-	definitions []AddressFieldDefinition,
-) (AddressEntry, error) {
-	email, err := validation.NormalizeEmail(entry.Email)
-	if err != nil {
-		return AddressEntry{}, err
-	}
-	fields, err := normalizeAddressFields(entry.Fields, email, definitions)
-	if err != nil {
-		return AddressEntry{}, err
-	}
-	entry.Email = email
-	entry.Fields = fields
-
+func setAddressEntryDisplayName(entry *AddressEntry) {
 	titleCaser := cases.Title(language.Und)
 	nameParts := make([]string, 0, 2)
 	for _, role := range []AddressFieldRole{
@@ -1002,21 +895,21 @@ func normalizeAddressEntry(
 	}
 	entry.DisplayName = strings.Join(nameParts, " ")
 	if entry.DisplayName == "" {
-		entry.DisplayName = entry.Email
+		entry.DisplayName = entry.Fields["email"]
 	}
-	return entry, nil
 }
 
 func normalizeAddressFields(
 	fields AddressFields,
-	email string,
 	definitions []AddressFieldDefinition,
 ) (AddressFields, error) {
 	allowed := make(map[string]bool, len(definitions))
 	next := make(AddressFields, len(definitions))
 	for _, definition := range definitions {
 		allowed[definition.Key] = true
-		next[definition.Key] = ""
+		if definition.Key != "email" {
+			next[definition.Key] = ""
+		}
 	}
 	seen := map[string]string{}
 	for key, value := range fields {
@@ -1032,13 +925,15 @@ func normalizeAddressFields(
 		if !allowed[key] {
 			return nil, fmt.Errorf("field %q is not defined for this address list", key)
 		}
+		if key == "email" {
+			continue
+		}
 		trimmed, err := validation.TrimField(value, key)
 		if err != nil {
 			return nil, err
 		}
 		next[key] = trimmed
 	}
-	next[string(AddressFieldRoleEmail)] = email
 	return next, nil
 }
 
@@ -1647,10 +1542,6 @@ func decodeTaskMetadata(task *taskpkg.Task, metadataJSON string) error {
 // Delivery outcomes.
 
 func (s *Store) CreateDelivery(ctx context.Context, d MessageDelivery) (MessageDelivery, error) {
-	email, err := validation.NormalizeEmail(d.Email)
-	if err != nil {
-		return MessageDelivery{}, err
-	}
 	if d.Attempt <= 0 {
 		d.Attempt = 1
 	}
@@ -1659,13 +1550,12 @@ func (s *Store) CreateDelivery(ctx context.Context, d MessageDelivery) (MessageD
 	}
 	res, err := s.db.ExecContext(ctx, `
 		INSERT INTO message_deliveries
-			(task_id, campaign_id, address_entry_id, email, status, attempt, provider_message_id, last_error)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			(task_id, campaign_id, email, status, attempt, provider_message_id, last_error)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
 	`,
 		d.TaskID,
 		d.CampaignID,
-		d.AddressEntryID,
-		email,
+		d.Email,
 		d.Status,
 		d.Attempt,
 		d.ProviderMessageID,
@@ -1702,7 +1592,7 @@ func (s *Store) UpdateDeliveryAttempt(ctx context.Context, id int64, attempt int
 func (s *Store) GetDelivery(ctx context.Context, id int64) (MessageDelivery, error) {
 	var d MessageDelivery
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, task_id, campaign_id, address_entry_id, email, status, attempt,
+		SELECT id, task_id, campaign_id, email, status, attempt,
 		       provider_message_id, last_error, created_at, updated_at
 		FROM message_deliveries
 		WHERE id = ?
@@ -1710,7 +1600,6 @@ func (s *Store) GetDelivery(ctx context.Context, id int64) (MessageDelivery, err
 		&d.ID,
 		&d.TaskID,
 		&d.CampaignID,
-		&d.AddressEntryID,
 		&d.Email,
 		&d.Status,
 		&d.Attempt,
@@ -1724,7 +1613,7 @@ func (s *Store) GetDelivery(ctx context.Context, id int64) (MessageDelivery, err
 
 func (s *Store) ListDeliveriesForTask(ctx context.Context, taskID int64) ([]MessageDelivery, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, task_id, campaign_id, address_entry_id, email, status, attempt,
+		SELECT id, task_id, campaign_id, email, status, attempt,
 		       provider_message_id, last_error, created_at, updated_at
 		FROM message_deliveries
 		WHERE task_id = ?
@@ -1741,7 +1630,6 @@ func (s *Store) ListDeliveriesForTask(ctx context.Context, taskID int64) ([]Mess
 			&d.ID,
 			&d.TaskID,
 			&d.CampaignID,
-			&d.AddressEntryID,
 			&d.Email,
 			&d.Status,
 			&d.Attempt,
@@ -1760,32 +1648,12 @@ func (s *Store) ListDeliveriesForTask(ctx context.Context, taskID int64) ([]Mess
 // Suppressions.
 
 func (s *Store) IsSuppressed(ctx context.Context, email string) (bool, error) {
-	normalized, err := validation.NormalizeEmail(email)
-	if err != nil {
-		return false, err
-	}
 	var exists int
-	err = s.db.QueryRowContext(ctx, `SELECT 1 FROM suppressions WHERE email = ? LIMIT 1`, normalized).Scan(&exists)
+	err := s.db.QueryRowContext(ctx, `SELECT 1 FROM suppressions WHERE email = ? LIMIT 1`, email).Scan(&exists)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
 	return err == nil, err
-}
-
-func (s *Store) AddSuppression(ctx context.Context, email, reason string) error {
-	normalized, err := validation.NormalizeEmail(email)
-	if err != nil {
-		return err
-	}
-	reason = strings.TrimSpace(reason)
-	if reason == "" {
-		reason = "manual"
-	}
-	_, err = s.db.ExecContext(ctx, `
-		INSERT INTO suppressions (email, reason) VALUES (?, ?)
-		ON CONFLICT(email) DO UPDATE SET reason = excluded.reason
-	`, normalized, reason)
-	return err
 }
 
 func (s *Store) ListSuppressions(ctx context.Context) ([]Suppression, error) {
@@ -1828,10 +1696,6 @@ func (s *Store) FinalizeInterruptedTask(
 	emails []string,
 	diagnostic string,
 ) error {
-	normalizedEmails, err := normalizeTaskEmails(emails)
-	if err != nil {
-		return err
-	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -1853,7 +1717,7 @@ func (s *Store) FinalizeInterruptedTask(
 		tx,
 		taskID,
 		campaignID,
-		normalizedEmails,
+		emails,
 		"interrupted",
 		diagnostic,
 	); err != nil {
@@ -1870,10 +1734,6 @@ func (s *Store) CancelQueuedCampaignTask(
 	taskID int64,
 	emails []string,
 ) (bool, error) {
-	normalizedEmails, err := normalizeTaskEmails(emails)
-	if err != nil {
-		return false, err
-	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return false, err
@@ -1892,7 +1752,7 @@ func (s *Store) CancelQueuedCampaignTask(
 		tx,
 		taskID,
 		campaignID,
-		normalizedEmails,
+		emails,
 		"cancelled",
 		diagnostic,
 	); err != nil {
@@ -1939,9 +1799,9 @@ func insertMissingTaskOutcomes(
 	for _, email := range emails {
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO message_deliveries (
-				task_id, campaign_id, address_entry_id, email, status, attempt, last_error
+				task_id, campaign_id, email, status, attempt, last_error
 			)
-			SELECT ?, ?, NULL, ?, ?, 1, ?
+			SELECT ?, ?, ?, ?, 1, ?
 			WHERE NOT EXISTS (
 				SELECT 1 FROM message_deliveries WHERE task_id = ? AND email = ?
 			)
@@ -1982,23 +1842,6 @@ func finalizeTaskStatus(
 		WHERE id = ?
 	`, status, diagnostic, taskID, taskID, taskID, taskID)
 	return err
-}
-
-func normalizeTaskEmails(emails []string) ([]string, error) {
-	normalized := make([]string, 0, len(emails))
-	seen := make(map[string]struct{}, len(emails))
-	for _, email := range emails {
-		value, err := validation.NormalizeEmail(email)
-		if err != nil {
-			return nil, err
-		}
-		if _, exists := seen[value]; exists {
-			continue
-		}
-		seen[value] = struct{}{}
-		normalized = append(normalized, value)
-	}
-	return normalized, nil
 }
 
 // Shared helpers.

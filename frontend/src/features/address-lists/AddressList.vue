@@ -1,45 +1,55 @@
 <script setup lang="ts">
-import { useTemplateRef } from "vue";
+import { nextTick, useTemplateRef } from "vue";
 import ExpandableSearch from "../../components/ExpandableSearch.vue";
 import PlusButton from "../../components/PlusButton.vue";
+import Table from "../../components/Table.vue";
 import { addressFieldValue } from "../../import";
 import { useAddressListsFeature } from "./useAddressLists";
 
 const {
   selectedList,
   importState,
-  importSummary,
   entrySearch,
   selectedEntryKeys,
   entryRows,
   entryGridStyle,
   addEntry,
-  entryKey,
   deleteSelectedEntries,
   suppressSelectedEntries,
-  selectAllEntries,
   handleImportChange,
   save,
-  remove,
   exportList,
-  updateEntryEmail,
-  updateEntryField,
+  drafts,
+  writing,
+  updateEntry,
+  cancelDraft,
 } = useAddressListsFeature();
 
 const importInput = useTemplateRef<HTMLInputElement>("importInput");
+const table = useTemplateRef<HTMLElement>("table");
+
+async function addAddress(): Promise<void> {
+  addEntry();
+  await nextTick();
+  table.value?.querySelector<HTMLElement>(".data-table__row:last-child input[type=text]")?.focus();
+}
+
 </script>
 
 <template>
   <section class="bulk-mail-section">
-    <form id="bulk-mail-address-list-form" class="app-form bulk-mail-form" @submit.prevent="save">
+    <form class="app-form bulk-mail-form" @submit.prevent>
       <fieldset class="bulk-mail-fieldset">
         <label class="app-form-field">
           <span>List name</span>
-          <input v-model="selectedList.name" type="text" placeholder="April launch audience" required />
+          <input
+            v-model="selectedList.name" type="text" placeholder="April launch audience"
+            :disabled="writing" required @change="save()"
+          />
         </label>
         <label class="app-form-field">
           <span>Notes</span>
-          <textarea v-model="selectedList.notes" rows="3"></textarea>
+          <textarea v-model="selectedList.notes" rows="3" :disabled="writing" @change="save()"></textarea>
         </label>
       </fieldset>
       <fieldset class="bulk-mail-fieldset">
@@ -51,7 +61,6 @@ const importInput = useTemplateRef<HTMLInputElement>("importInput");
           accept=".csv,.tsv,.xlsx,.vcf,.vcard"
           @change="handleImportChange"
         />
-        <p v-if="importSummary" class="app-form-status" data-state="success">{{ importSummary }}</p>
         <details v-if="importState.warnings.length > 0" class="bulk-mail-import-warnings">
           <summary>{{ importState.warnings.length }} import warnings</summary>
           <ul><li v-for="(warning, index) in importState.warnings" :key="index">{{ warning.message }}</li></ul>
@@ -60,19 +69,32 @@ const importInput = useTemplateRef<HTMLInputElement>("importInput");
 
     </form>
 
-    <div class="data-table">
-      <div class="data-table__toolbar">
-        <div class="data-table__toolbar-start">
-          <PlusButton label="Add address" @click="addEntry" />
-          <button type="button" class="data-table__action" @click="importInput?.click()">Import</button>
+    <div ref="table">
+      <Table
+        v-model:selected-keys="selectedEntryKeys"
+        :rows="entryRows"
+        :row-key="(row) => row.entry.id === null ? row.key : String(row.entry.id)"
+        selectable
+        :selection-disabled="writing"
+        :is-row-selectable="(row) => !row.draft"
+        :row-label="(row) => row.entry.fields.email"
+        :row-class="(row) => [
+          'data-table__row--entries',
+          row.unsaved ? 'address-entry--unsaved' : '',
+          row.draft?.rejected ? 'address-entry--rejected' : '',
+        ].join(' ')"
+        :row-style="entryGridStyle"
+        header-class="data-table__row--entries data-table__row--field-header"
+        empty-text="No addresses yet."
+      >
+        <template #actions>
+          <PlusButton label="Add address" :disabled="writing" @click="addAddress" />
           <button
             type="button"
             class="data-table__action"
-            :disabled="selectedList.entries.length === 0"
-            @click="selectAllEntries"
-          >
-            Select all
-          </button>
+            :disabled="writing || drafts.length > 0"
+            @click="importInput?.click()"
+          >Import</button>
           <button
             type="button"
             class="data-table__action"
@@ -84,7 +106,7 @@ const importInput = useTemplateRef<HTMLInputElement>("importInput");
           <button
             type="button"
             class="data-table__action"
-            :disabled="selectedEntryKeys.length === 0"
+            :disabled="writing || selectedEntryKeys.length === 0"
             @click="suppressSelectedEntries"
           >
             Suppress selected
@@ -92,21 +114,17 @@ const importInput = useTemplateRef<HTMLInputElement>("importInput");
           <button
             type="button"
             class="data-table__action data-table__action--danger"
-            :disabled="selectedEntryKeys.length === 0"
+            :disabled="selectedEntryKeys.length === 0 || writing || drafts.length > 0"
             @click="deleteSelectedEntries"
           >
             Delete selected{{ selectedEntryKeys.length > 0 ? ' (' + selectedEntryKeys.length + ')' : '' }}
           </button>
-        </div>
-        <ExpandableSearch v-model="entrySearch" label="Search addresses" />
-      </div>
-      <div class="data-table__viewport">
-        <div
-          class="data-table__row data-table__row--header data-table__row--entries data-table__row--field-header"
-          :style="entryGridStyle"
-          role="row"
-        >
-          <div class="data-table__cell"></div>
+        </template>
+        <template #search>
+          <ExpandableSearch v-model="entrySearch" label="Search addresses" />
+        </template>
+        <template #header>
+          <div class="data-table__cell bulk-mail-field-heading">ID</div>
           <div
             v-for="field in selectedList.fields"
             :key="field.key"
@@ -114,46 +132,38 @@ const importInput = useTemplateRef<HTMLInputElement>("importInput");
           >
             {{ field.label }}
           </div>
-        </div>
-        <div v-if="entryRows.length === 0" class="data-table__empty">No addresses yet.</div>
-        <div
-          v-for="row in entryRows"
-          v-else
-          :key="entryKey(row.entry, row.index)"
-          class="data-table__row data-table__row--entries"
-          :style="entryGridStyle"
-          role="row"
-        >
-          <div class="data-table__cell data-table__cell--select" data-label="Select">
-            <input v-model="selectedEntryKeys" type="checkbox" :value="entryKey(row.entry, row.index)" />
-          </div>
+        </template>
+        <template #row="{ row }">
+          <div class="data-table__cell" data-label="ID">{{ row.entry.id ?? "" }}</div>
           <div v-for="field in selectedList.fields" :key="field.key" class="data-table__cell" :data-label="field.label">
             <input
-              v-if="field.role === 'email'"
-              :value="row.entry.email"
-              type="email"
-              placeholder="name@example.com"
-              required
-              form="bulk-mail-address-list-form"
-              @input="updateEntryEmail(row.entry, $event)"
-            />
-            <input
-              v-else
               :value="addressFieldValue(row.entry.fields, field.key)"
               type="text"
-              :placeholder="field.label"
-              form="bulk-mail-address-list-form"
-              @input="updateEntryField(row.entry, field.key, $event)"
+              :aria-label="field.label"
+              :inputmode="field.role === 'email' ? 'email' : 'text'"
+              :disabled="writing"
+              @input="updateEntry(row.entry, field.key, $event)"
+              @change="save(row.entry)"
+              @keydown.esc="row.draft && cancelDraft(row.draft)"
             />
           </div>
-        </div>
-      </div>
-    </div>
-    <div class="app-stage-actions">
-      <button v-if="selectedList.id" type="button" @click="remove">Delete</button>
-      <button type="submit" class="is-primary" form="bulk-mail-address-list-form">
-        {{ selectedList.id ? "Save address list" : "Create address list" }}
-      </button>
+        </template>
+      </Table>
     </div>
   </section>
 </template>
+
+<style scoped>
+:deep(.address-entry--unsaved) {
+  --border-color: var(--warning-color);
+}
+:deep(.address-entry--rejected) {
+  --border-color: var(--error-color);
+}
+:deep(.address-entry--unsaved input:focus-visible),
+:deep(.address-entry--rejected input:focus-visible) {
+  border-color: var(--border-color);
+  outline: none;
+  box-shadow: none;
+}
+</style>

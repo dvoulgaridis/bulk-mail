@@ -165,7 +165,7 @@ func New(repo *store.Store, paths local.Paths, uiFS fs.FS, options Options) (*Se
 	mux.HandleFunc("/api/smtp/detect", s.requireLocalToken(s.handleSMTPDetect))
 	mux.HandleFunc("/api/oauth/google/start", s.requireLocalToken(s.handleGoogleOAuthStart))
 	mux.HandleFunc("/api/oauth/google/callback", s.handleGoogleOAuthCallback)
-	mux.HandleFunc("/api/address-lists/import", s.requireLocalToken(s.handleImportAddressList))
+	mux.HandleFunc("/api/address-lists", s.requireLocalToken(s.handleAddressLists))
 	mux.HandleFunc("/api/address-lists/", s.requireLocalToken(s.handleAddressListByID))
 	mux.HandleFunc("/api/campaigns", s.requireLocalToken(s.handleCampaigns))
 	mux.HandleFunc("/api/campaigns/", s.requireLocalToken(s.handleCampaignByID))
@@ -175,7 +175,6 @@ func New(repo *store.Store, paths local.Paths, uiFS fs.FS, options Options) (*Se
 	mux.HandleFunc("/api/tasks/", s.requireLocalToken(s.handleTaskByID))
 	mux.HandleFunc("/api/events/tasks", s.requireLocalToken(s.handleTaskEvents))
 	mux.HandleFunc("/api/suppressions", s.requireLocalToken(s.handleSuppressions))
-	mux.HandleFunc("/api/suppressions/", s.requireLocalToken(s.handleSuppressionByID))
 	mux.HandleFunc("/api/app/quit", s.requireLocalToken(s.handleQuit))
 	mux.Handle("/", http.FileServer(http.FS(uiFS)))
 	s.Server = &http.Server{Handler: s.localOnly(mux)}

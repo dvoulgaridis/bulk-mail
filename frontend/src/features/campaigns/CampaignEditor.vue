@@ -73,8 +73,8 @@ function sandboxedHTML(html: string): string {
             <span>Additional sample address entry</span>
             <select v-model.number="sampleAddressEntryID">
               <option :value="0">First and last only</option>
-              <option v-for="entry in sampleAddressEntries" :key="entry.id" :value="entry.id">
-                {{ entry.displayName || entry.email }} — {{ entry.email }}
+              <option v-for="entry in sampleAddressEntries" :key="entry.fields.email" :value="entry.id">
+                {{ entry.displayName || entry.fields.email }} — {{ entry.fields.email }}
               </option>
             </select>
           </label>

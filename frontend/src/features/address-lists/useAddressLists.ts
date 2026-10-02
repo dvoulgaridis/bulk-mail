@@ -8,17 +8,17 @@ import {
 } from "vue";
 import type {
   AddressEntry,
+  EntryWriteResult,
   AddressFieldDefinition,
   AddressList,
 } from "../../api/types";
 import type { WorkspaceContext } from "../../app/context";
 import { saveTextFile } from "../../common/files";
 import { shortDate } from "../../common/format";
+import { entryWriteSucceeded, notifyEntryWrites } from "../../common/entryWrites";
 import { exportAddressListAsCSV, exportAddressListAsVCard } from "../../import/export";
 import {
   MAX_IMPORT_WARNINGS,
-  addressEntryDisplayName,
-  addressFieldValue,
   applyColumnMappingToRows,
   createAddressListEntry,
   parseAddressListFile,
@@ -34,6 +34,12 @@ type EditableAddressList = Omit<AddressList, "entries"> & {
   entries: AddressEntry[];
 };
 
+type EntryDraft = {
+  key: number;
+  entry: AddressEntry;
+  rejected: boolean;
+};
+
 type PendingImport = {
   fileName: string;
   rows: string[][];
@@ -43,8 +49,6 @@ type PendingImport = {
 
 type ImportState = {
   fileName: string;
-  importedCount: number;
-  skippedDuplicateCount: number;
   warnings: ImportWarning[];
   pending: PendingImport | null;
   mappingForm: ColumnMapping;
@@ -69,12 +73,14 @@ export function useAddressListsFeature(): AddressListsFeature {
 function createAddressListsFeature(workspace: WorkspaceContext) {
   const listSearch = ref("");
   const entrySearch = ref("");
+  const drafts = ref<EntryDraft[]>([]);
+  const writing = ref(false);
+  let nextDraftKey = 0;
   const selectedEntryKeys = ref<string[]>([]);
   const selectedList = reactive<EditableAddressList>(emptyAddressList(workspace.state.addressFieldDefaults));
+  let savedMetadata = metadataKey(selectedList);
   const importState = reactive<ImportState>({
     fileName: "",
-    importedCount: 0,
-    skippedDuplicateCount: 0,
     warnings: [],
     pending: null,
     mappingForm: emptyColumnMapping(),
@@ -95,20 +101,25 @@ function createAddressListsFeature(workspace: WorkspaceContext) {
 
   const entryRows = computed(() => {
     const query = entrySearch.value.trim().toLowerCase();
-    return selectedList.entries
-      .map((entry, index) => ({ entry, index }))
-      .filter(({ entry }) => !query || [entry.email, ...Object.values(entry.fields)].some((value) =>
-        value.toLowerCase().includes(query),
-      ));
-  });
-
-  const importSummary = computed(() => {
-    if (!importState.fileName) return "";
-    const parts = [`Imported ${importState.importedCount} addresses from ${importState.fileName}.`];
-    if (importState.skippedDuplicateCount > 0) {
-      parts.push(`${importState.skippedDuplicateCount} duplicate addresses skipped.`);
+    const editable = new Map(drafts.value
+      .filter((draft) => draft.entry.id !== null)
+      .map((draft) => [draft.entry.id, draft]));
+    const rows = selectedList.entries.map((entry) => {
+      const draft = editable.get(entry.id);
+      const unsaved = draft ? Object.keys({ ...entry.fields, ...draft.entry.fields }).some((key) =>
+        (entry.fields[key] || "") !== (draft.entry.fields[key] || ""),
+      ) : false;
+      return { entry: draft?.entry || entry, draft, unsaved, key: `saved-${entry.id}` };
+    });
+    const displayed = new Set(rows.map((row) => row.draft?.key));
+    for (const draft of drafts.value) {
+      if (!displayed.has(draft.key)) {
+        rows.push({ entry: draft.entry, draft, unsaved: true, key: `draft-${draft.key}` });
+      }
     }
-    return parts.join(" ");
+    return rows.filter(({ entry, draft }) => draft || !query ||
+      Object.values(entry.fields).some((value) => value.toLowerCase().includes(query)),
+    );
   });
 
   const omittedColumnCount = computed(() => {
@@ -128,85 +139,137 @@ function createAddressListsFeature(workspace: WorkspaceContext) {
   });
 
   const entryGridStyle = computed(() => ({
-    gridTemplateColumns: `minmax(3rem, 4rem) repeat(${Math.max(selectedList.fields.length, 1)}, minmax(11rem, 1fr))`,
+    gridTemplateColumns: `repeat(2, minmax(3rem, 4rem)) repeat(${Math.max(selectedList.fields.length, 1)}, minmax(11rem, 1fr))`,
   }));
 
   function openNewAddressList(): void {
+    if (writing.value) return;
     Object.assign(selectedList, emptyAddressList(workspace.state.addressFieldDefaults));
+    savedMetadata = metadataKey(selectedList);
+    drafts.value = [];
     clearImportState();
     selectedEntryKeys.value = [];
     workspace.navigate("address-list-detail");
   }
 
   async function edit(id: number): Promise<void> {
+    if (writing.value) return;
     await workspace.runAction(async () => {
+      drafts.value = [];
+      clearImportState();
       await requestAddressList(id);
       workspace.navigate("address-list-detail");
     });
   }
 
-  async function requestAddressList(id: number): Promise<void> {
+  async function requestAddressList(id: number, keepMetadataDraft = false): Promise<void> {
     const addressList = await workspace.api.request<AddressList>(`/api/address-lists/${id}`);
-    selectAddressList(addressList);
-  }
-
-  function selectAddressList(addressList: AddressList): void {
-    const fields = addressList.fields.map((field) => ({ ...field }));
-    Object.assign(selectedList, {
-      ...addressList,
-      notes: addressList.notes || "",
-      fields,
-      entries: (addressList.entries || []).map((entry) => normalizeAddressEntry(entry, fields)),
-    });
-    ensureEntryFields();
-    clearImportState();
+    savedMetadata = metadataKey(addressList);
+    const metadataDraft = keepMetadataDraft
+      ? { name: selectedList.name, notes: selectedList.notes, source: selectedList.source }
+      : {};
+    Object.assign(selectedList, addressList, { entries: addressList.entries || [] }, metadataDraft);
     selectedEntryKeys.value = [];
   }
 
   function addEntry(): void {
-    selectedList.entries.push(createAddressListEntry("", selectedList.fields));
+    if (writing.value) return;
+    drafts.value.push({
+      key: ++nextDraftKey,
+      entry: createAddressListEntry("", selectedList.fields),
+      rejected: false,
+    });
   }
 
-  function entryKey(entry: AddressEntry, index: number): string {
-    return entry.id > 0 ? String(entry.id) : `new-${index}`;
+  function entryKey(entry: AddressEntry): string {
+    return String(entry.id);
   }
 
-  function deleteSelectedEntries(): void {
-    if (selectedEntryKeys.value.length === 0) return;
-    const selected = new Set(selectedEntryKeys.value);
-    selectedList.entries = selectedList.entries.filter((entry, index) => !selected.has(entryKey(entry, index)));
-    selectedEntryKeys.value = [];
+  function updateEntry(entry: AddressEntry, field: string, event: Event): void {
+    if (writing.value || !(event.target instanceof HTMLInputElement)) return;
+    if (entry.fields[field] === event.target.value) return;
+    let draft = drafts.value.find((item) => item.entry === entry || (
+      entry.id !== null && item.entry.id === entry.id
+    ));
+    if (!draft) {
+      draft = {
+        key: ++nextDraftKey,
+        entry: { ...entry, fields: { ...entry.fields } },
+        rejected: false,
+      };
+      drafts.value.push(draft);
+    }
+    draft.entry.fields[field] = event.target.value;
+    draft.rejected = false;
+    if (!entryRows.value.some((row) => row.draft?.key === draft.key && row.unsaved)) cancelDraft(draft);
+  }
+
+  function cancelDraft(draft: EntryDraft): void {
+    if (!writing.value) drafts.value = drafts.value.filter((item) => item.key !== draft.key);
+  }
+
+  async function write(action: () => Promise<void>): Promise<boolean> {
+    if (writing.value) return false;
+    let completed = false;
+    writing.value = true;
+    try {
+      await workspace.runAction(async () => {
+        try {
+          await action();
+          completed = true;
+        }
+        catch (error) {
+          // Refresh persisted rows while retaining drafts after a rejected or uncertain write.
+          try {
+            if (selectedList.id) await requestAddressList(selectedList.id, true);
+            await workspace.refresh();
+          }
+          finally { throw error; }
+        }
+      });
+    }
+    finally { writing.value = false; }
+    return completed;
+  }
+
+  async function deleteSelectedEntries(): Promise<void> {
+    if (drafts.value.length || !selectedEntryKeys.value.length) return;
+    await write(async () => {
+      const result = await workspace.api.request<EntryWriteResult>(
+        `/api/address-lists/${selectedList.id}/entries/delete`,
+        { method: "POST", body: { ids: selectedEntryKeys.value.map(Number) } },
+      );
+      await requestAddressList(selectedList.id, true);
+      await workspace.refresh();
+      notifyEntryWrites(workspace, result);
+    });
   }
 
   async function suppressSelectedEntries(): Promise<void> {
     if (selectedEntryKeys.value.length === 0) return;
     const selected = new Set(selectedEntryKeys.value);
     const emails = selectedList.entries
-      .filter((entry, index) => selected.has(entryKey(entry, index)))
-      .map((entry) => entry.email.trim())
-      .filter(Boolean);
+      .filter((entry) => selected.has(entryKey(entry)))
+      .map((entry) => entry.fields.email);
     if (emails.length === 0) {
       workspace.notify("Selected rows do not contain email addresses.", "error");
       return;
     }
-    await workspace.runAction(async () => {
-      await workspace.api.request("/api/suppressions", { method: "POST", body: { emails, reason: "address list" } });
-      await workspace.refresh();
-      workspace.notify(`${emails.length} selected address${emails.length === 1 ? "" : "es"} added to suppressions.`);
+    await write(async () => {
+      const result = await workspace.api.request<EntryWriteResult>("/api/suppressions", {
+        method: "POST", body: { emails, reason: "address list" },
+      });
+      await workspace.requestSuppressions();
+      notifyEntryWrites(workspace, result);
     });
   }
 
-  function selectAllEntries(): void {
-    selectedEntryKeys.value = selectedList.entries.map(entryKey);
-  }
-
   async function handleImportChange(event: Event): Promise<void> {
+    if (writing.value) return;
     const input = event.target as HTMLInputElement;
     const file = input.files?.[0];
     if (!file) return;
     importState.fileName = file.name;
-    importState.importedCount = 0;
-    importState.skippedDuplicateCount = 0;
     importState.warnings = [];
     try {
       const result = await parseAddressListFile(file, selectedList.fields);
@@ -219,7 +282,7 @@ function createAddressListsFeature(workspace: WorkspaceContext) {
         };
         importState.mappingForm = cloneColumnMapping(result.columnMapping);
         workspace.navigate("mapping");
-      } else applyImportResult(result);
+      } else await requestImport(result);
     } catch (error) {
       workspace.notify(error instanceof Error ? error.message : String(error), "error");
     } finally {
@@ -282,7 +345,7 @@ function createAddressListsFeature(workspace: WorkspaceContext) {
     workspace.navigate("address-list-detail");
   }
 
-  function applyMapping(): void {
+  async function applyMapping(): Promise<void> {
     const pending = importState.pending;
     if (!pending) {
       workspace.navigate("address-list-detail");
@@ -299,7 +362,7 @@ function createAddressListsFeature(workspace: WorkspaceContext) {
     try {
       const result = applyColumnMappingToRows(pending.rows, cloneColumnMapping(importState.mappingForm));
       result.warnings = [...pending.warnings, ...result.warnings].slice(0, MAX_IMPORT_WARNINGS);
-      applyImportResult(result);
+      if (!await requestImport(result)) return;
       importState.pending = null;
       workspace.navigate("address-list-detail");
     } catch (error) {
@@ -307,35 +370,62 @@ function createAddressListsFeature(workspace: WorkspaceContext) {
     }
   }
 
-  async function save(): Promise<void> {
-    const existing = selectedList.id > 0;
-    await workspace.runAction(async () => {
-      const path = selectedList.id
-        ? `/api/address-lists/${selectedList.id}`
-        : "/api/address-lists/import";
-      const list = await workspace.api.request<AddressList>(path, {
+  // Metadata and entries are separate writes; only GET populates persisted rows.
+  async function requestSaveMetadata(): Promise<void> {
+    if (selectedList.id && metadataKey(selectedList) === savedMetadata) return;
+    const saved = await workspace.api.request<{ id: number }>(
+      selectedList.id ? `/api/address-lists/${selectedList.id}` : "/api/address-lists",
+      {
         method: selectedList.id ? "PUT" : "POST",
         body: {
-          name: selectedList.name.trim(),
-          source: selectedList.source,
-          notes: selectedList.notes.trim(),
-          fields: selectedList.fields.map((field) => ({ ...field })),
-          entries: selectedList.entries.map((entry) => addressEntryWritePayload(entry, selectedList.fields)),
+          name: selectedList.name, source: selectedList.source, notes: selectedList.notes,
+          fields: selectedList.fields,
         },
-      });
-      await workspace.refresh();
-      selectAddressList(list);
-      workspace.notify(existing ? "Address list saved." : "Address list created.");
-    });
+      },
+    );
+    await requestAddressList(saved.id);
+    await workspace.refresh();
   }
 
-  async function remove(): Promise<void> {
-    if (!selectedList.id || !window.confirm("Delete this address list?")) return;
-    await workspace.runAction(async () => {
-      await workspace.api.request<void>(`/api/address-lists/${selectedList.id}`, { method: "DELETE" });
-      await workspace.refresh();
-      workspace.navigate("address-lists");
-      workspace.notify("Address list deleted.");
+  async function requestEntryWrites(
+    pending: EntryDraft[], operation: "insert" | "update", fields?: AddressFieldDefinition[],
+  ): Promise<void> {
+    if (!pending.length) return;
+    const result = await workspace.api.request<EntryWriteResult>(
+      `/api/address-lists/${selectedList.id}/entries${fields ? "/import" : ""}`,
+      {
+        method: operation === "update" ? "PATCH" : "POST",
+        body: {
+          fields,
+          entries: pending.map(({ entry }) => operation === "insert"
+            ? { fields: entry.fields }
+            : { id: entry.id, fields: entry.fields }),
+        },
+      },
+    );
+    const accepted = new Set<number>();
+    for (const outcome of result.results) {
+      const draft = pending[outcome.index];
+      if (!draft) continue;
+      if (entryWriteSucceeded(outcome)) {
+        accepted.add(draft.key);
+      } else draft.rejected = outcome.status !== "not_processed";
+    }
+    drafts.value = drafts.value.filter((draft) => !accepted.has(draft.key));
+    if (result.stopped) throw new Error(result.stopped);
+    await requestAddressList(selectedList.id, true);
+    await workspace.refresh();
+    notifyEntryWrites(workspace, result);
+  }
+
+  async function save(entry?: AddressEntry): Promise<void> {
+    if (writing.value) return;
+    const draft = entry && drafts.value.find((item) => item.entry === entry);
+    if (entry && !draft) return;
+    if (!draft && metadataKey(selectedList) === savedMetadata) return;
+    await write(async () => {
+      await requestSaveMetadata();
+      if (draft) await requestEntryWrites([draft], draft.entry.id === null ? "insert" : "update");
     });
   }
 
@@ -350,89 +440,26 @@ function createAddressListsFeature(workspace: WorkspaceContext) {
     );
   }
 
-  function applyImportResult(result: ImportResult): void {
+  async function requestImport(result: ImportResult): Promise<boolean> {
     if (!result.fields) throw new Error("The imported address fields are unavailable.");
-    selectedList.fields = result.fields.map((field) => ({ ...field }));
-    const appended = appendImportedEntries(result.entries, [...result.warnings]);
-    selectedList.entries = [...selectedList.entries, ...appended.entries];
-    ensureEntryFields();
-    refreshEntryDisplayNames();
-    importState.importedCount = appended.entries.length;
-    importState.skippedDuplicateCount = appended.skippedDuplicates;
-    importState.warnings = appended.warnings;
-    selectedList.source = "file";
-    if (!selectedList.name.trim()) {
-      selectedList.name = importState.fileName.replace(/\.[^.]+$/, "") || "Imported addresses";
-    }
-    if (!selectedList.notes.trim()) selectedList.notes = "Imported from file.";
-    if (importSummary.value) workspace.notify(importSummary.value);
-  }
-
-  function appendImportedEntries(entries: AddressEntry[], warnings: ImportWarning[]) {
-    const existingEmails = new Set(selectedList.entries.map((entry) => entry.email.trim().toLowerCase()));
-    const nextEntries: AddressEntry[] = [];
-    let skippedDuplicates = 0;
-    for (const entry of entries) {
-      const email = entry.email.trim().toLowerCase();
-      if (existingEmails.has(email)) {
-        skippedDuplicates += 1;
-        if (warnings.length < MAX_IMPORT_WARNINGS) {
-          warnings.push({
-            row: 0,
-            field: "email",
-            message: `Imported email "${entry.email}" already exists and was skipped.`,
-          });
-        }
-        continue;
+    return write(async () => {
+      if (!selectedList.name) {
+        selectedList.name = importState.fileName.replace(/\.[^.]+$/, "") || "Imported addresses";
       }
-      existingEmails.add(email);
-      nextEntries.push(entry);
-    }
-    return { entries: nextEntries, skippedDuplicates, warnings };
-  }
-
-  function ensureEntryFields(): void {
-    for (const entry of selectedList.entries) {
-      entry.fields = Object.fromEntries(selectedList.fields.map((field) => [
-        field.key,
-        field.role === "email" ? entry.email : addressFieldValue(entry.fields, field.key),
-      ]));
-    }
-  }
-
-  function refreshEntryDisplayNames(): void {
-    const emailField = selectedList.fields.find((field) => field.role === "email");
-    for (const entry of selectedList.entries) {
-      if (emailField) entry.fields[emailField.key] = entry.email;
-      entry.displayName = addressEntryDisplayName(entry.fields, entry.email, selectedList.fields);
-    }
-  }
-
-  function updateEntryEmail(entry: AddressEntry, event: Event): void {
-    const target = event.target;
-    if (!(target instanceof HTMLInputElement)) return;
-    entry.email = target.value;
-    refreshEntryDisplayName(entry);
-  }
-
-  function updateEntryField(entry: AddressEntry, key: string, event: Event): void {
-    const target = event.target;
-    if (!(target instanceof HTMLInputElement)) return;
-    entry.fields[key] = target.value;
-    refreshEntryDisplayName(entry);
-  }
-
-  function refreshEntryDisplayName(entry: AddressEntry): void {
-    const emailField = selectedList.fields.find((field) => field.role === "email");
-    if (emailField) entry.fields[emailField.key] = entry.email;
-    entry.displayName = addressEntryDisplayName(entry.fields, entry.email, selectedList.fields);
+      selectedList.source = "file";
+      await requestSaveMetadata();
+      const pending = result.entries.map((entry) => ({
+        key: ++nextDraftKey, entry, rejected: false,
+      }));
+      drafts.value.push(...pending);
+      await requestEntryWrites(pending, "insert", result.fields);
+      importState.warnings = result.warnings;
+    });
   }
 
   function clearImportState(): void {
     Object.assign(importState, {
       fileName: "",
-      importedCount: 0,
-      skippedDuplicateCount: 0,
       warnings: [],
       pending: null,
       mappingForm: emptyColumnMapping(),
@@ -448,16 +475,13 @@ function createAddressListsFeature(workspace: WorkspaceContext) {
     listRows,
     entryRows,
     entryGridStyle,
-    importSummary,
     omittedColumnCount,
     canAddCustomMapping,
     openNewAddressList,
     edit,
     addEntry,
-    entryKey,
     deleteSelectedEntries,
     suppressSelectedEntries,
-    selectAllEntries,
     handleImportChange,
     mappingPreview,
     addCustomMapping,
@@ -466,11 +490,16 @@ function createAddressListsFeature(workspace: WorkspaceContext) {
     cancelMapping,
     applyMapping,
     save,
-    remove,
     exportList,
-    updateEntryEmail,
-    updateEntryField,
+    drafts,
+    writing,
+    updateEntry,
+    cancelDraft,
   };
+}
+
+function metadataKey(list: AddressList): string {
+  return JSON.stringify([list.name, list.notes, list.source]);
 }
 
 function emptyAddressList(definitions: AddressFieldDefinition[]): EditableAddressList {
@@ -496,27 +525,5 @@ function cloneColumnMapping(mapping: ColumnMapping): ColumnMapping {
     fields: mapping.fields.map((field) => ({ ...field })),
     headerLabels: [...mapping.headerLabels],
     suggestedEmailColumn: mapping.suggestedEmailColumn,
-  };
-}
-
-function normalizeAddressEntry(entry: AddressEntry, definitions: AddressFieldDefinition[]): AddressEntry {
-  const email = entry.email.trim();
-  const fields = Object.fromEntries(definitions.map((field) => [
-    field.key,
-    field.role === "email" ? email : addressFieldValue(entry.fields, field.key).trim(),
-  ]));
-  return {
-    id: entry.id || 0,
-    email,
-    displayName: addressEntryDisplayName(fields, email, definitions),
-    fields,
-  };
-}
-
-function addressEntryWritePayload(entry: AddressEntry, definitions: AddressFieldDefinition[]) {
-  const normalized = normalizeAddressEntry(entry, definitions);
-  return {
-    email: normalized.email,
-    fields: normalized.fields,
   };
 }

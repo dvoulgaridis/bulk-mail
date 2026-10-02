@@ -27,7 +27,6 @@ export {
   MAX_ADDRESS_FIELD_CHARACTERS,
   MAX_IMPORT_WARNINGS,
   MAX_PLACEHOLDER_KEY_CHARACTERS,
-  addressEntryDisplayName,
   addressFieldValue,
   applyColumnMappingToRows,
   createAddressListEntry,

@@ -120,7 +120,7 @@ function worksheetCellValue(cell: Element, sharedStrings: string[]): string {
   if (type === "inlineStr") {
     return Array.from(cell.getElementsByTagName("t")).map((node) => node.textContent ?? "").join("");
   }
-  return (cell.getElementsByTagName("v")[0]?.textContent ?? "").trim();
+  return cell.getElementsByTagName("v")[0]?.textContent ?? "";
 }
 
 function columnRefToIndex(ref: string): number {

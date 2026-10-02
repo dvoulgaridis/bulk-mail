@@ -46,29 +46,12 @@ export function applyColumnMappingToRows(rows: string[][], mapping: ColumnMappin
   const definitions = mappedFields.map((field) => field.definition);
   const emailMapping = mappedFields.find((field) => field.definition.role === "email");
   if (!emailMapping || emailMapping.sourceIndex < 0) throw new Error("Choose the address email column.");
-  const seenEmails = new Set<string>();
-  const entries = rows.slice(1, MAX_IMPORT_ROWS + 1).reduce<AddressEntry[]>((items, row, index) => {
-    const rowNumber = index + 2;
+  const entries = rows.slice(1, MAX_IMPORT_ROWS + 1).reduce<AddressEntry[]>((items, row) => {
     const fields = Object.create(null) as Record<string, string>;
     for (const field of mappedFields) {
-      fields[field.definition.key] = importCell(
-        row,
-        field.sourceIndex,
-        rowNumber,
-        field.definition.label,
-        warnings,
-      );
+      fields[field.definition.key] = row[field.sourceIndex] ?? "";
     }
-    const email = (fields[emailMapping.definition.key] || "").toLowerCase();
-    if (!isValidEmail(email)) {
-      addImportWarning(warnings, rowNumber, `Row ${rowNumber}: skipped - no valid email found.`, "email");
-      return items;
-    }
-    if (seenEmails.has(email)) {
-      addImportWarning(warnings, rowNumber, `Row ${rowNumber}: duplicate email "${email}" skipped.`, "email");
-      return items;
-    }
-    seenEmails.add(email);
+    const email = fields[emailMapping.definition.key] || "";
     items.push(createAddressListEntry(email, definitions, fields));
     return items;
   }, []);
@@ -85,24 +68,10 @@ export function createAddressListEntry(
   const emailField = definitions.find((field) => field.role === "email");
   if (emailField) fields[emailField.key] = email;
   return {
-    id: 0,
-    email,
-    displayName: addressEntryDisplayName(fields, email, definitions),
+    id: null,
+    displayName: "",
     fields,
   };
-}
-
-export function addressEntryDisplayName(
-  fields: Record<string, string>,
-  email: string,
-  definitions: AddressFieldDefinition[],
-): string {
-  const combined = definitions
-    .filter((field) => field.role === "first_name" || field.role === "last_name")
-    .map((field) => titleCaseAddressField(addressFieldValue(fields, field.key)))
-    .filter(Boolean)
-    .join(" ");
-  return combined || email.trim().toLowerCase();
 }
 
 export function addressFieldValue(fields: Record<string, string>, key: string): string {
@@ -116,19 +85,6 @@ export function addImportWarning(warnings: ImportWarning[], row: number, message
 
 export function addTruncationWarning(warnings: ImportWarning[], truncated: boolean): void {
   if (truncated) addImportWarning(warnings, MAX_IMPORT_ROWS + 1, `File truncated after ${MAX_IMPORT_ROWS} rows.`);
-}
-
-export function trimImportField(value: string, row: number, field: string, warnings: ImportWarning[]): string {
-  const trimmed = value.trim();
-  const characters = Array.from(trimmed);
-  if (characters.length <= MAX_ADDRESS_FIELD_CHARACTERS) return trimmed;
-  addImportWarning(
-    warnings,
-    row,
-    `Row ${row}: ${field} truncated to ${MAX_ADDRESS_FIELD_CHARACTERS} characters.`,
-    field,
-  );
-  return characters.slice(0, MAX_ADDRESS_FIELD_CHARACTERS).join("");
 }
 
 function normalizePlaceholderKey(value: string): string {
@@ -204,10 +160,6 @@ export function validateColumnMapping(fields: ColumnMappingField[], maxFields: n
   return "";
 }
 
-export function isValidEmail(value: string): boolean {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
-}
-
 export function stripBOM(text: string): string {
   return text.startsWith("\uFEFF") ? text.slice(1) : text;
 }
@@ -238,22 +190,6 @@ function detectedSource(headers: string[], candidates: Set<string>): number {
   return matches.length === 1 ? matches[0] : -1;
 }
 
-function titleCaseAddressField(value: string): string {
-  return value
-    .trim()
-    .replace(/\s+/gu, " ")
-    .normalize("NFC")
-    .toLocaleLowerCase()
-    .split(" ")
-    .map((part) => {
-      const characters = Array.from(part);
-      return characters.length === 0
-        ? ""
-        : characters[0].toLocaleUpperCase() + characters.slice(1).join("");
-    })
-    .join(" ");
-}
-
 function matchingHeaders(headers: string[], candidates: Set<string>): number[] {
   return headers.reduce<number[]>((matches, header, index) => {
     if (candidates.has(header)) matches.push(index);
@@ -265,13 +201,9 @@ function suggestedEmailSource(rows: string[][], columnCount: number): number {
   const candidates: number[] = [];
   for (let column = 0; column < columnCount; column += 1) {
     const values = rows.slice(0, 20).map((row) => (row[column] || "").trim()).filter(Boolean);
-    if (values.length > 0 && values.every(isValidEmail)) candidates.push(column);
+    if (values.length > 0 && values.every((value) => value.includes("@"))) candidates.push(column);
   }
   return candidates.length === 1 ? candidates[0] : -1;
-}
-
-function importCell(row: string[], index: number, rowNumber: number, field: string, warnings: ImportWarning[]): string {
-  return index >= 0 ? trimImportField(row[index] ?? "", rowNumber, field, warnings) : "";
 }
 
 function normalizeDetectionHeader(value: string): string {

@@ -15,7 +15,6 @@ import (
 	"github.com/dvoulgaridis/bulk-mail/internal/mail"
 	"github.com/dvoulgaridis/bulk-mail/internal/store"
 	"github.com/dvoulgaridis/bulk-mail/internal/tasks"
-	"github.com/dvoulgaridis/bulk-mail/internal/validation"
 )
 
 const taskProfileFilename = "profile.json"
@@ -153,7 +152,6 @@ func (service *CampaignService) captureCampaignSnapshot(
 	)
 	for index := range snapshot.AddressList.Entries {
 		entry := &snapshot.AddressList.Entries[index]
-		entry.ID = 0
 		entry.Fields = maps.Clone(entry.Fields)
 	}
 	return snapshot, nil
@@ -342,10 +340,8 @@ func (service *CampaignService) RecoverInterruptedCampaignTask(
 		var snapshot CampaignTaskSnapshot
 		if err := decodeTaskJSON(manifest, &snapshot); err != nil {
 			diagnostic = safeDiagnostic(fmt.Sprintf("%s; task manifest is invalid: %v", interrupted, err))
-		} else if values, err := normalizedSnapshotEmails(snapshot); err != nil {
-			diagnostic = safeDiagnostic(fmt.Sprintf("%s; task manifest is invalid: %v", interrupted, err))
 		} else {
-			emails = values
+			emails = snapshotEmails(snapshot)
 		}
 	}
 	return service.execution.FinalizeInterruptedTask(ctx, taskID, emails, diagnostic)
@@ -360,23 +356,15 @@ func (service *CampaignService) CancelQueuedCampaignTask(
 	if err := decodeTaskJSON(manifest, &snapshot); err != nil {
 		return false, fmt.Errorf("decode queued campaign task snapshot: %w", err)
 	}
-	emails, err := normalizedSnapshotEmails(snapshot)
-	if err != nil {
-		return false, fmt.Errorf("validate queued campaign task snapshot: %w", err)
-	}
-	return service.execution.CancelQueuedCampaignTask(ctx, taskID, emails)
+	return service.execution.CancelQueuedCampaignTask(ctx, taskID, snapshotEmails(snapshot))
 }
 
-func normalizedSnapshotEmails(snapshot CampaignTaskSnapshot) ([]string, error) {
+func snapshotEmails(snapshot CampaignTaskSnapshot) []string {
 	emails := make([]string, 0, len(snapshot.AddressList.Entries))
 	for _, entry := range snapshot.AddressList.Entries {
-		email, err := validation.NormalizeEmail(entry.Email)
-		if err != nil {
-			return nil, err
-		}
-		emails = append(emails, email)
+		emails = append(emails, entry.Fields["email"])
 	}
-	return emails, nil
+	return emails
 }
 
 func (service *CampaignService) loadCampaignTaskSnapshot(

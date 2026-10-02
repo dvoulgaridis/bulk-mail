@@ -9,11 +9,7 @@ type ExportableList = {
 export function exportAddressListAsCSV(list: ExportableList): string {
   const rows = [
     list.fields.map((field) => field.label),
-    ...list.entries.map((entry) => list.fields.map((field) => (
-      field.role === "email"
-        ? entry.email
-        : addressFieldValue(entry.fields, field.key)
-    ))),
+    ...list.entries.map((entry) => list.fields.map((field) => addressFieldValue(entry.fields, field.key))),
   ];
   return rows.map((row) => row.map(csvEscape).join(",")).join("\r\n");
 }
@@ -25,13 +21,13 @@ export function exportAddressListAsVCard(list: ExportableList): string {
     .flatMap((entry) => {
       const firstName = firstNameKey ? addressFieldValue(entry.fields, firstNameKey) : "";
       const lastName = lastNameKey ? addressFieldValue(entry.fields, lastNameKey) : "";
-      const displayName = [firstName, lastName].filter(Boolean).join(" ") || entry.email;
+      const displayName = [firstName, lastName].filter(Boolean).join(" ") || entry.fields.email;
       return [
         "BEGIN:VCARD",
         "VERSION:3.0",
         `N:${escapeVCardText(lastName)};${escapeVCardText(firstName)};;;`,
         `FN:${escapeVCardText(displayName)}`,
-        `EMAIL;TYPE=INTERNET:${entry.email}`,
+        `EMAIL;TYPE=INTERNET:${entry.fields.email}`,
         "END:VCARD",
       ];
     })

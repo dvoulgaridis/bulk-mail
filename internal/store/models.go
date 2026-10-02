@@ -9,6 +9,24 @@ import (
 type AddressFieldRole string
 type ProfileType string
 
+type EntryOutcome struct {
+	Index   int    `json:"index"`
+	ID      int64  `json:"id,omitempty"`
+	Status  string `json:"status"`
+	Message string `json:"message,omitempty"`
+}
+
+type EntryWriteResult struct {
+	Results []EntryOutcome `json:"results"`
+	Stopped string         `json:"stopped,omitempty"`
+}
+
+type EntryWriteCommand struct {
+	Entries []AddressEntry           `json:"entries"`
+	IDs     []int64                  `json:"ids"`
+	Fields  []AddressFieldDefinition `json:"fields,omitempty"`
+}
+
 const (
 	NewCampaignID                    = int64(-1)
 	DefaultEmailRatePerMin           = 60
@@ -144,8 +162,7 @@ func DefaultAddressFields() []AddressFieldDefinition {
 type AddressFields map[string]string
 
 type AddressEntry struct {
-	ID          int64         `json:"id"`
-	Email       string        `json:"email"`
+	ID          int64         `json:"id"` // SQLite-managed position within the list; zero until saved.
 	DisplayName string        `json:"displayName"`
 	Fields      AddressFields `json:"fields"`
 }
@@ -183,7 +200,6 @@ type MessageDelivery struct {
 	ID                int64  `json:"id"`
 	TaskID            int64  `json:"taskId"`
 	CampaignID        *int64 `json:"campaignId"`
-	AddressEntryID    *int64 `json:"addressEntryId"`
 	Email             string `json:"email"`
 	Status            string `json:"status"`
 	Attempt           int    `json:"attempt"`

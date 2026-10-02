@@ -56,8 +56,7 @@ export type SMTPDetectResponse = {
 };
 
 export type AddressEntry = {
-  id: number;
-  email: string;
+  id: number | null;
   displayName: string;
   fields: Record<string, string>;
 };
@@ -123,6 +122,21 @@ export type Campaign = {
   updatedAt: string;
 };
 
+export type EntryOutcome = {
+  index: number;
+  id?: number;
+  status:
+    | "inserted" | "updated" | "deleted"
+    | "invalid" | "duplicate" | "rejected" | "not_found"
+    | "failed" | "not_processed";
+  message?: string;
+};
+
+export type EntryWriteResult = {
+  results: EntryOutcome[];
+  stopped?: string;
+};
+
 export type SaveCampaignCommand = Pick<
   Campaign,
   "name" | "addressListId" | "profileId" | "message" | "personalization"
@@ -159,7 +173,6 @@ export type MessageDelivery = {
   id: number;
   taskId: number;
   campaignId: number | null;
-  addressEntryId: number | null;
   email: string;
   status: string;
   attempt: number;

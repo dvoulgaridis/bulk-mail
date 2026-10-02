@@ -3,6 +3,7 @@ import { api } from "../api/client";
 import {
   emptyWorkspaceState,
   type AppState,
+  type Suppression,
   type TaskStreamPayload,
 } from "../api/types";
 import { TaskList } from "../features/tasks/TaskList";
@@ -51,6 +52,10 @@ export function createWorkspace(): WorkspaceContext {
 
   async function refresh(): Promise<void> {
     Object.assign(state, await api.request<AppState>("/api/state"));
+  }
+
+  async function requestSuppressions(): Promise<void> {
+    state.suppressions = await api.request<Suppression[]>("/api/suppressions");
   }
 
   function connectTaskEvents(): void {
@@ -108,6 +113,7 @@ export function createWorkspace(): WorkspaceContext {
     tasks,
     bootstrap,
     refresh,
+    requestSuppressions,
     disconnectTaskEvents,
     navigate,
     notify,

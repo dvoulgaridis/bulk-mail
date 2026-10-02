@@ -11,7 +11,7 @@ import (
 
 const (
 	applicationID = 0x424d424d
-	schemaVersion = 3
+	schemaVersion = 7
 )
 
 func Open(path string) (*sql.DB, error) {
@@ -149,12 +149,13 @@ var schemaStatements = []string{
 		UNIQUE (address_list_id, position)
 	);`,
 	`CREATE TABLE IF NOT EXISTS address_list_entries (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		id INTEGER NOT NULL,
 		address_list_id INTEGER NOT NULL REFERENCES address_lists(id) ON DELETE CASCADE,
 		email TEXT NOT NULL,
 		fields_json TEXT NOT NULL DEFAULT '{}',
-		created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-	);`,
+		created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		PRIMARY KEY (address_list_id, id)
+	) WITHOUT ROWID;`,
 	`CREATE UNIQUE INDEX IF NOT EXISTS address_list_entries_address_list_email_unique
 		ON address_list_entries(address_list_id, lower(email));`,
 	`CREATE TABLE IF NOT EXISTS campaigns (
@@ -209,7 +210,6 @@ var schemaStatements = []string{
 				id INTEGER PRIMARY KEY AUTOINCREMENT,
 				task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
 				campaign_id INTEGER REFERENCES campaigns(id) ON DELETE SET NULL,
-				address_entry_id INTEGER REFERENCES address_list_entries(id) ON DELETE SET NULL,
 				email TEXT NOT NULL,
 				status TEXT NOT NULL,
 				attempt INTEGER NOT NULL DEFAULT 1,

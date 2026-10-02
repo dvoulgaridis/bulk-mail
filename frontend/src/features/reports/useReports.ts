@@ -1,3 +1,5 @@
+import type { EntryWriteResult } from "../../api/types";
+import { notifyEntryWrites } from "../../common/entryWrites";
 import { computed, inject, provide, ref, watch, type InjectionKey } from "vue";
 import type { TaskReport } from "../../api/types";
 import type { WorkspaceContext } from "../../app/context";
@@ -116,12 +118,12 @@ function createReportsFeature(workspace: WorkspaceContext) {
 
   async function suppressEmailAddress(email: string): Promise<void> {
     await workspace.runAction(async () => {
-      await workspace.api.request("/api/suppressions", {
+      const result = await workspace.api.request<EntryWriteResult>("/api/suppressions", {
         method: "POST",
         body: { emails: [email], reason: "delivery report" },
       });
-      await workspace.refresh();
-      workspace.notify(`${email} added to suppressions.`);
+      await workspace.requestSuppressions();
+      notifyEntryWrites(workspace, result);
     });
   }
 

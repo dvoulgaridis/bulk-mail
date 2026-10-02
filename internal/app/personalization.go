@@ -42,7 +42,6 @@ func personalizedFields(
 	if fields == nil {
 		fields = make(store.AddressFields)
 	}
-	fields[string(store.AddressFieldRoleEmail)] = strings.TrimSpace(entry.Email)
 	fields[string(store.AddressFieldRoleFirstName)] = formatName(firstName, options.FirstNameFormat)
 	fields[string(store.AddressFieldRoleLastName)] = formatName(lastName, options.LastNameFormat)
 	fields["full_name"] = formatName(
@@ -70,7 +69,7 @@ func personalizedName(entry store.AddressEntry, fields map[string]string) string
 	if name != "" {
 		return name
 	}
-	return entry.Email
+	return entry.Fields["email"]
 }
 
 func formatName(value, format string) string {

@@ -33,6 +33,7 @@ export type WorkspaceContext = {
   tasks: TaskList;
   bootstrap: () => Promise<void>;
   refresh: () => Promise<void>;
+  requestSuppressions: () => Promise<void>;
   disconnectTaskEvents: () => void;
   navigate: (route: RouteName) => void;
   notify: (text: string, type?: Notification["type"]) => void;

@@ -294,7 +294,7 @@ func (service *CampaignService) Preflight(
 		if err != nil {
 			return PreflightResult{}, failure(
 				ErrorProcessing,
-				fmt.Sprintf("sample for %s failed: %v", entry.Email, err),
+				fmt.Sprintf("sample for %s failed: %v", entry.Fields["email"], err),
 				err,
 			)
 		}
@@ -640,12 +640,11 @@ func (service *CampaignService) executeSend(ctx context.Context, run preparedSen
 			return
 		}
 		delivery, err := service.execution.CreateDelivery(ctx, store.MessageDelivery{
-			TaskID:         run.taskID,
-			CampaignID:     optionalID(run.campaign.Campaign.ID),
-			AddressEntryID: optionalID(item.Entry.ID),
-			Email:          item.Entry.Email,
-			Status:         "attempted",
-			Attempt:        1,
+			TaskID:     run.taskID,
+			CampaignID: optionalID(run.campaign.Campaign.ID),
+			Email:      item.Entry.Fields["email"],
+			Status:     "attempted",
+			Attempt:    1,
 		})
 		if err != nil {
 			releaseCampaignItem(&item, budget, admission)
@@ -685,7 +684,7 @@ func (service *CampaignService) executeSend(ctx context.Context, run preparedSen
 			)
 			continue
 		}
-		suppressed, err := service.suppressions.IsSuppressed(ctx, item.Entry.Email)
+		suppressed, err := service.suppressions.IsSuppressed(ctx, item.Entry.Fields["email"])
 		if err != nil {
 			releaseCampaignItem(&item, budget, admission)
 			if ctx.Err() != nil {
@@ -753,7 +752,7 @@ func (service *CampaignService) executeSend(ctx context.Context, run preparedSen
 		content := renderMessage(run.campaign.Campaign.Message, messageFields, messageOptions.SubstitutePlaceholders)
 		content.Attachments = item.Attachments
 		message := withSignature(mail.Message{
-			ToEmail:        item.Entry.Email,
+			ToEmail:        item.Entry.Fields["email"],
 			ToName:         personalizedName(item.Entry, messageFields),
 			MessageContent: content,
 		})
@@ -835,7 +834,7 @@ func (service *CampaignService) prepareCampaignItems(
 			Entry:            entry,
 			AttachmentFields: fields,
 		}
-		item.InitiallySuppressed, item.Err = service.suppressions.IsSuppressed(ctx, entry.Email)
+		item.InitiallySuppressed, item.Err = service.suppressions.IsSuppressed(ctx, entry.Fields["email"])
 		if item.Err == nil && !item.InitiallySuppressed {
 			item.Attachments, item.ReservedBytes, item.Err = prepareAddressEntryAttachments(
 				ctx,
@@ -947,7 +946,7 @@ func (service *CampaignService) executeGeneration(ctx context.Context, run prepa
 	for _, entry := range run.campaign.AddressList.Entries {
 		fields := personalizedFields(entry, run.campaign.Campaign.Personalization.Attachments.PlaceholderOptions)
 		addressEntries = append(addressEntries, document.CampaignAddressEntry{
-			Email:       entry.Email,
+			Email:       entry.Fields["email"],
 			DisplayName: personalizedName(entry, fields),
 			Values:      fields,
 		})
@@ -963,17 +962,14 @@ func (service *CampaignService) executeGeneration(ctx context.Context, run prepa
 		archiveStaticAttachments(run.campaign.Campaign.Message.Attachments),
 		sharedDocuments,
 		func(result document.GenerationResult) error {
-			entry := run.campaign.AddressList.Entries[processedEntries]
-			delivery, createErr := service.execution.CreateDelivery(contextForStatus(ctx), store.MessageDelivery{
-				TaskID:         run.taskID,
-				CampaignID:     optionalID(run.campaign.Campaign.ID),
-				AddressEntryID: optionalID(entry.ID),
-				Email:          result.Email,
-				Status:         result.Status,
-				Attempt:        1,
-				LastError:      safeDiagnostic(result.Error),
+			_, createErr := service.execution.CreateDelivery(contextForStatus(ctx), store.MessageDelivery{
+				TaskID:     run.taskID,
+				CampaignID: optionalID(run.campaign.Campaign.ID),
+				Email:      result.Email,
+				Status:     result.Status,
+				Attempt:    1,
+				LastError:  safeDiagnostic(result.Error),
 			})
-			_ = delivery
 			if createErr != nil {
 				return createErr
 			}
@@ -1101,13 +1097,12 @@ func (service *CampaignService) recordRemaining(
 ) {
 	for _, entry := range entries {
 		_, err := service.execution.CreateDelivery(ctx, store.MessageDelivery{
-			TaskID:         taskID,
-			CampaignID:     optionalID(campaignID),
-			AddressEntryID: optionalID(entry.ID),
-			Email:          entry.Email,
-			Status:         status,
-			Attempt:        1,
-			LastError:      safeDiagnostic(message),
+			TaskID:     taskID,
+			CampaignID: optionalID(campaignID),
+			Email:      entry.Fields["email"],
+			Status:     status,
+			Attempt:    1,
+			LastError:  safeDiagnostic(message),
 		})
 		if err != nil {
 			slog.Error("record remaining delivery outcome failed", "task_id", taskID)
@@ -1191,7 +1186,7 @@ func messagePreview(
 	message = renderMessage(message, fields, options.SubstitutePlaceholders)
 	preview := MessagePreview{
 		AddressEntryID: entry.ID,
-		Email:          entry.Email,
+		Email:          entry.Fields["email"],
 		Name:           personalizedName(entry, fields),
 		Subject:        message.Subject,
 		Body:           appendTextFooter(message.Body),
