@@ -87,13 +87,16 @@ function selectAll(event: Event): void {
         v-for="row in rows" :key="rowKey(row)"
         :type="rowAction && !selectable ? 'button' : undefined"
         class="data-table__row"
-        :class="[rowClass?.(row), { 'data-table__row--link': rowAction && !selectable }]"
-        :style="rowStyle" role="row"
+        :class="[rowClass?.(row), { 'data-table__row--link': rowAction }]"
+        :style="rowStyle" :role="rowAction ? 'button' : 'row'"
+        :tabindex="rowAction && selectable ? 0 : undefined"
         :data-active="isRowActive?.(row) || undefined"
-        :aria-label="!selectable ? rowLabel?.(row) : undefined"
-        @click="!selectable && rowAction?.(row)"
+        :aria-label="rowLabel?.(row)"
+        @click="rowAction?.(row)"
+        @keydown.enter.self="selectable && rowAction?.(row)"
+        @keydown.space.self="selectable && rowAction && ($event.preventDefault(), rowAction(row))"
       >
-        <div v-if="selectable" class="data-table__cell data-table__cell--select" data-label="Select">
+        <div v-if="selectable" class="data-table__cell data-table__cell--select" data-label="Select" @click.stop>
           <input
             v-if="!isRowSelectable || isRowSelectable(row)"
             type="checkbox" :aria-label="`Select ${rowLabel?.(row) || rowKey(row)}`"
