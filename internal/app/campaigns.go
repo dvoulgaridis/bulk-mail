@@ -499,6 +499,10 @@ func prepareCampaign(snapshot CampaignTaskSnapshot) (preparedCampaign, error) {
 	for index := range documents {
 		documents[index].SubstitutePlaceholders = snapshot.Campaign.Personalization.Attachments.SubstitutePlaceholders
 		documents[index].ConvertToPDF = snapshot.Campaign.Personalization.Attachments.ConvertDOCXToPDF
+		if err := documents[index].PrepareForConversion(); err != nil {
+			return preparedCampaign{}, failure(ErrorValidation,
+				fmt.Sprintf("%s: %v", documents[index].Filename, err), err)
+		}
 	}
 	campaign.Documents = documents
 	return campaign, nil
