@@ -49,15 +49,15 @@ The builder creates versioned platform archives and `checksums.txt` under `dist/
 Linux:
 
 ```sh
-tar -xzf ./dist/bulk-mail-v0.1.0-linux-amd64.tar.gz
+tar -xzf ./dist/bulk-mail-v0.x.x-linux-amd64.tar.gz
 cd bulk-mail
 ./bulk-mail
 ```
 
-macOS:
+macOS (Apple Silicon; use `darwin-amd64` instead for Intel Macs):
 
 ```sh
-tar -xzf ./dist/bulk-mail-v0.1.0-darwin-arm64.tar.gz
+tar -xzf ./dist/bulk-mail-v0.x.x-darwin-arm64.tar.gz
 cd bulk-mail
 ./bulk-mail
 ```
@@ -65,7 +65,7 @@ cd bulk-mail
 Windows PowerShell:
 
 ```powershell
-Expand-Archive .\dist\bulk-mail-v0.1.0-windows-amd64.zip -DestinationPath .
+Expand-Archive .\dist\bulk-mail-v0.x.x-windows-amd64.zip -DestinationPath .
 Set-Location .\bulk-mail
 .\bulk-mail.exe
 ```
