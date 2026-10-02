@@ -44,9 +44,7 @@ async function addMapping(): Promise<void> {
   <section class="bulk-mail-section">
     <form v-if="importState.pending" class="app-form bulk-mail-form" @submit.prevent="applyMapping">
       <fieldset class="bulk-mail-fieldset">
-        <legend>Column mapping</legend>
-        <p class="bulk-mail-import-heading">Choose address fields for {{ importState.pending.fileName }}.</p>
-        <p class="app-form-help">Email is required. First name and last name are optional.</p>
+        <legend>Column mapping ({{ importState.pending.fileName }})</legend>
 
         <div ref="mappingList" class="bulk-mail-mapping-list">
           <div
@@ -76,7 +74,9 @@ async function addMapping(): Promise<void> {
                 </label>
               </template>
               <template v-else>
-                <strong>{{ field.label }}</strong>
+                <strong :class="{ 'bulk-mail-required-field': field.role === 'email' }">
+                  {{ field.label }}
+                </strong>
                 <code v-if="field.origin === 'persisted'">{{ placeholderToken(field.key) }}</code>
               </template>
             </div>
@@ -120,7 +120,6 @@ async function addMapping(): Promise<void> {
             >
               <span aria-hidden="true">−</span>
             </button>
-            <span v-else-if="field.role === 'email'" class="bulk-mail-required-field">Required</span>
           </div>
         </div>
 
