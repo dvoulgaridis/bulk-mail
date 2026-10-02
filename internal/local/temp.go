@@ -50,15 +50,15 @@ func (paths TemporaryPaths) Validate() error {
 	return nil
 }
 
-func OpenTemporarySpace(workingDirectory string) (*TemporarySpace, error) {
-	if strings.TrimSpace(workingDirectory) == "" {
-		return nil, errors.New("launch working directory is required")
+func OpenTemporarySpace(dataDirectory string) (*TemporarySpace, error) {
+	if strings.TrimSpace(dataDirectory) == "" {
+		return nil, errors.New("data directory is required")
 	}
-	workingDirectory, err := filepath.Abs(workingDirectory)
+	dataDirectory, err := filepath.Abs(dataDirectory)
 	if err != nil {
-		return nil, fmt.Errorf("resolve absolute launch working directory: %w", err)
+		return nil, fmt.Errorf("resolve absolute data directory: %w", err)
 	}
-	sharedRoot := filepath.Join(workingDirectory, "tmp")
+	sharedRoot := filepath.Join(dataDirectory, "tmp")
 	if err := os.MkdirAll(sharedRoot, 0o700); err != nil {
 		return nil, fmt.Errorf("create temporary root %s: %w", sharedRoot, err)
 	}

@@ -74,7 +74,7 @@ func run(opts options) error {
 	if err := local.EnsureDataDir(paths); err != nil {
 		return fmt.Errorf("create data directory: %w", err)
 	}
-	temporarySpace, err := local.OpenTemporarySpace(paths.WorkingDirectory)
+	temporarySpace, err := local.OpenTemporarySpace(paths.DataDir)
 	if err != nil {
 		return fmt.Errorf("initialize temporary storage: %w", err)
 	}

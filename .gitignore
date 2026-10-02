@@ -7,7 +7,6 @@
 # Local runtime state
 /data/
 /logs/
-/tmp/
 
 # Node / TypeScript
 node_modules/
