@@ -472,6 +472,11 @@ function createAddressListsFeature(workspace: WorkspaceContext) {
   }
 
   async function requestImport(result: ImportResult): Promise<boolean> {
+    if (result.entries.length === 0) {
+      importState.warnings = result.warnings;
+      workspace.notify("No address entries found in the imported file.");
+      return true;
+    }
     if (!result.fields) throw new Error("The imported address fields are unavailable.");
     return write(async () => {
       if (!selectedList.name) {
