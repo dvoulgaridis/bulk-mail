@@ -57,7 +57,6 @@ type MessagePreview struct {
 	Email          string `json:"email"`
 	Name           string `json:"name"`
 	Subject        string `json:"subject"`
-	Body           string `json:"body"`
 	HTMLBody       string `json:"htmlBody"`
 }
 
@@ -224,6 +223,9 @@ func (service *CampaignService) SaveCampaign(
 	if err := validatePersonalization(campaign.Personalization); err != nil {
 		return store.Campaign{}, err
 	}
+	if err := validateMessage(campaign.Message, campaign.Personalization.Message.SubstitutePlaceholders); err != nil {
+		return store.Campaign{}, err
+	}
 	for _, options := range []*store.PlaceholderOptions{
 		&campaign.Personalization.Message,
 		&campaign.Personalization.Attachments.PlaceholderOptions,
@@ -277,9 +279,13 @@ func (service *CampaignService) Preflight(
 	}
 	defer budget.release(sharedBytes)
 	for _, entry := range sampleEntries(campaign.AddressList.Entries, command.SampleAddressEntryID) {
+		preview, err := messagePreview(entry, campaign.Campaign.Message, campaign.Campaign.Personalization.Message)
+		if err != nil {
+			return PreflightResult{}, failure(ErrorProcessing, err.Error(), err)
+		}
 		fields := personalizedFields(entry, campaign.Campaign.Personalization.Attachments.PlaceholderOptions)
 		sample := PreflightSample{
-			MessagePreview: messagePreview(entry, campaign.Campaign.Message, campaign.Campaign.Personalization.Message),
+			MessagePreview: preview,
 			Attachments:    []PreflightAttachment{},
 		}
 		attachments, reserved, err := prepareAddressEntryAttachments(
@@ -357,7 +363,6 @@ func validatePreparedCampaign(
 	if campaign.Campaign.Personalization.Message.SubstitutePlaceholders {
 		addLocations(locations, "subject", templates.Keys(campaign.Campaign.Message.Subject))
 		addLocations(locations, "message body", templates.Keys(campaign.Campaign.Message.Body))
-		addLocations(locations, "HTML body", templates.Keys(campaign.Campaign.Message.HTMLBody))
 	}
 	documentID := 0
 	for _, attachment := range campaign.Campaign.Message.Attachments {
@@ -504,6 +509,11 @@ func validateCampaignRuntime(snapshot CampaignTaskSnapshot) error {
 		return failure(ErrorValidation, err.Error(), err)
 	}
 	if err := validatePersonalization(snapshot.Campaign.Personalization); err != nil {
+		return err
+	}
+	if err := validateMessage(
+		snapshot.Campaign.Message, snapshot.Campaign.Personalization.Message.SubstitutePlaceholders,
+	); err != nil {
 		return err
 	}
 	if len(snapshot.AddressList.Entries) > snapshot.Settings.MaxCampaignAddressEntries {
@@ -751,11 +761,16 @@ func (service *CampaignService) executeSend(ctx context.Context, run preparedSen
 		messageFields := personalizedFields(item.Entry, messageOptions)
 		content := renderMessage(run.campaign.Campaign.Message, messageFields, messageOptions.SubstitutePlaceholders)
 		content.Attachments = item.Attachments
-		message := withSignature(mail.Message{
+		message, err := withSignature(mail.Message{
 			ToEmail:        item.Entry.Fields["email"],
 			ToName:         personalizedName(item.Entry, messageFields),
 			MessageContent: content,
 		})
+		if err != nil {
+			releaseCampaignItem(&item, budget, admission)
+			service.recordFailure(run.taskID, delivery.ID, "failed_processing", err)
+			continue
+		}
 		result, attempt, kind, err := service.sendWithRetry(ctx, delivery.ID, run.sender, message, &pacer)
 		releaseCampaignItem(&item, budget, admission)
 		if err != nil {
@@ -1181,20 +1196,20 @@ func messagePreview(
 	entry store.AddressEntry,
 	message mail.MessageContent,
 	options store.PlaceholderOptions,
-) MessagePreview {
+) (MessagePreview, error) {
 	fields := personalizedFields(entry, options)
 	message = renderMessage(message, fields, options.SubstitutePlaceholders)
-	preview := MessagePreview{
+	signed, err := withSignature(mail.Message{MessageContent: message})
+	if err != nil {
+		return MessagePreview{}, err
+	}
+	return MessagePreview{
 		AddressEntryID: entry.ID,
 		Email:          entry.Fields["email"],
 		Name:           personalizedName(entry, fields),
 		Subject:        message.Subject,
-		Body:           appendTextFooter(message.Body),
-	}
-	if strings.TrimSpace(message.HTMLBody) != "" {
-		preview.HTMLBody = appendHTMLFooter(message.HTMLBody)
-	}
-	return preview
+		HTMLBody:       signed.Body,
+	}, nil
 }
 
 func sampleEntries(entries []store.AddressEntry, selectedID int64) []store.AddressEntry {

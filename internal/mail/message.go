@@ -3,7 +3,7 @@ package mail
 type MessageContent struct {
 	Subject               string       `json:"subject"`
 	Body                  string       `json:"body"`
-	HTMLBody              string       `json:"htmlBody"`
+	BodyFormat            string       `json:"bodyFormat"`
 	RequestDeliveryNotice bool         `json:"requestDeliveryNotice"`
 	Attachments           []Attachment `json:"attachments"`
 }

@@ -346,7 +346,7 @@ function newCampaign(): Campaign {
     message: {
       subject: "",
       body: "",
-      htmlBody: "",
+      bodyFormat: "text",
       requestDeliveryNotice: false,
       attachments: [],
     },

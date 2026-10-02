@@ -17,13 +17,15 @@ func WriteMessage(writer io.Writer, identity SenderIdentity, message Message) er
 	from := mail.Address{Name: identity.Name, Address: identity.Email}
 	to := mail.Address{Name: message.ToName, Address: message.ToEmail}
 	bodyContentType := "text/plain; charset=utf-8"
+	body := message.Body
+	if message.BodyFormat == "html" {
+		bodyContentType = "text/html; charset=utf-8"
+	}
+	contentType := bodyContentType
 	boundary := ""
 	if len(message.Attachments) > 0 {
 		boundary = mimeBoundary(identity.Email)
-		bodyContentType = fmt.Sprintf("multipart/mixed; boundary=%q", boundary)
-	} else if strings.TrimSpace(message.HTMLBody) != "" {
-		boundary = mimeBoundary(identity.Email)
-		bodyContentType = fmt.Sprintf("multipart/alternative; boundary=%q", boundary)
+		contentType = fmt.Sprintf("multipart/mixed; boundary=%q", boundary)
 	}
 	headers := []string{
 		"Date: " + time.Now().UTC().Format(time.RFC1123Z),
@@ -32,7 +34,10 @@ func WriteMessage(writer io.Writer, identity SenderIdentity, message Message) er
 		"To: " + to.String(),
 		"Subject: " + encodeHeader(message.Subject),
 		"MIME-Version: 1.0",
-		"Content-Type: " + bodyContentType,
+		"Content-Type: " + contentType,
+	}
+	if len(message.Attachments) == 0 {
+		headers = append(headers, "Content-Transfer-Encoding: 8bit")
 	}
 	if strings.TrimSpace(identity.ReplyTo) != "" {
 		headers = append(headers, "Reply-To: "+sanitizeHeader(identity.ReplyTo))
@@ -51,14 +56,11 @@ func WriteMessage(writer io.Writer, identity SenderIdentity, message Message) er
 	if _, err := io.WriteString(writer, strings.Join(headers, "\r\n")+"\r\n\r\n"); err != nil {
 		return err
 	}
-	if len(message.Attachments) == 0 && strings.TrimSpace(message.HTMLBody) == "" {
-		_, err := io.WriteString(writer, crlf(message.Body))
+	if len(message.Attachments) == 0 {
+		_, err := io.WriteString(writer, crlf(body))
 		return err
 	}
-	if len(message.Attachments) == 0 {
-		return writeAlternativeBody(writer, message, boundary)
-	}
-	return writeMultipartBody(writer, message, boundary)
+	return writeMultipartBody(writer, message, boundary, bodyContentType, body)
 }
 
 func messageID(sender string) string {
@@ -82,26 +84,11 @@ func mimeBoundary(seed string) string {
 	return "bulk-mail-" + fmt.Sprintf("%d", time.Now().UnixNano()) + "-" + sanitizeBoundary(seed)
 }
 
-func writeMultipartBody(writer io.Writer, message Message, boundary string) error {
-	if _, err := io.WriteString(writer, "--"+boundary+"\r\n"); err != nil {
+func writeMultipartBody(writer io.Writer, message Message, boundary, contentType, body string) error {
+	content := "--" + boundary + "\r\nContent-Type: " + contentType + "\r\n" +
+		"Content-Transfer-Encoding: 8bit\r\n\r\n" + crlf(body)
+	if _, err := io.WriteString(writer, content); err != nil {
 		return err
-	}
-	if strings.TrimSpace(message.HTMLBody) != "" {
-		alternativeBoundary := mimeBoundary(message.ToEmail)
-		contentType := "Content-Type: multipart/alternative; boundary=\"" +
-			alternativeBoundary + "\"\r\n\r\n"
-		if _, err := io.WriteString(writer, contentType); err != nil {
-			return err
-		}
-		if err := writeAlternativeBody(writer, message, alternativeBoundary); err != nil {
-			return err
-		}
-	} else {
-		content := "Content-Type: text/plain; charset=utf-8\r\n" +
-			"Content-Transfer-Encoding: 8bit\r\n\r\n" + crlf(message.Body)
-		if _, err := io.WriteString(writer, content); err != nil {
-			return err
-		}
 	}
 	if _, err := io.WriteString(writer, "\r\n"); err != nil {
 		return err
@@ -124,18 +111,6 @@ func writeMultipartBody(writer io.Writer, message Message, boundary string) erro
 		}
 	}
 	_, err := io.WriteString(writer, "--"+boundary+"--\r\n")
-	return err
-}
-
-func writeAlternativeBody(writer io.Writer, message Message, boundary string) error {
-	body := "--" + boundary + "\r\n" +
-		"Content-Type: text/plain; charset=utf-8\r\n" +
-		"Content-Transfer-Encoding: 8bit\r\n\r\n" + crlf(message.Body) +
-		"\r\n--" + boundary + "\r\n" +
-		"Content-Type: text/html; charset=utf-8\r\n" +
-		"Content-Transfer-Encoding: 8bit\r\n\r\n" + crlf(message.HTMLBody) +
-		"\r\n--" + boundary + "--\r\n"
-	_, err := io.WriteString(writer, body)
 	return err
 }
 

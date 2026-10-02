@@ -1,12 +1,15 @@
 package templates
 
 import (
+	"fmt"
 	"html"
+	"io"
 	"regexp"
 	"sort"
 	"strings"
 
 	"github.com/dvoulgaridis/bulk-mail/internal/validation"
+	nethtml "golang.org/x/net/html"
 )
 
 var tokenPattern = regexp.MustCompile(`\{\{\s*([\p{L}\p{N}\p{M}_.-]+)\s*\}\}`)
@@ -36,6 +39,33 @@ func RenderText(input string, fields map[string]string) string {
 
 func RenderHTML(input string, fields map[string]string) string {
 	return render(input, fields, html.EscapeString)
+}
+
+// HTML escaping is safe for text content, not attributes, tag names or raw-text elements.
+func ValidateHTMLPlaceholders(input string) error {
+	tokens := nethtml.NewTokenizer(strings.NewReader(input))
+	rawText := false
+	for {
+		kind := tokens.Next()
+		if kind == nethtml.ErrorToken {
+			if tokens.Err() == io.EOF {
+				return nil
+			}
+			return tokens.Err()
+		}
+		if (kind != nethtml.TextToken || rawText) && len(Keys(string(tokens.Raw()))) > 0 {
+			return fmt.Errorf("HTML placeholders must appear in text content, not tags, attributes or raw-text elements")
+		}
+		if kind == nethtml.StartTagToken {
+			name, _ := tokens.TagName()
+			switch string(name) {
+			case "script", "style", "xmp", "iframe", "noembed", "noframes", "plaintext":
+				rawText = true
+			}
+		} else if kind == nethtml.EndTagToken {
+			rawText = false
+		}
+	}
 }
 
 func render(input string, fields map[string]string, transform func(string) string) string {

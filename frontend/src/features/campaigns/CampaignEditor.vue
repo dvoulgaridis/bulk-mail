@@ -91,16 +91,15 @@ function sandboxedHTML(html: string): string {
           <input v-model="campaign.message.subject" type="text" required />
         </label>
         <label class="app-form-field">
-          <span>Message body</span>
-          <textarea v-model="campaign.message.body" rows="8" required></textarea>
+          <span>Message format</span>
+          <select v-model="campaign.message.bodyFormat">
+            <option value="text">Plain text</option>
+            <option value="html">HTML</option>
+          </select>
         </label>
         <label class="app-form-field">
-          <span>HTML body (optional)</span>
-          <textarea
-            v-model="campaign.message.htmlBody"
-            rows="8"
-            placeholder="&lt;p&gt;Hello {{first_name}}&lt;/p&gt;"
-          ></textarea>
+          <span>Message body</span>
+          <textarea v-model="campaign.message.body" rows="8"></textarea>
         </label>
         <PersonalizationOptions :options="campaign.personalization.message" />
       </fieldset>
@@ -195,7 +194,6 @@ function sandboxedHTML(html: string): string {
           </div>
           <div class="bulk-mail-preview-message">
             <strong>{{ sample.subject }}</strong>
-            <pre>{{ sample.body }}</pre>
             <iframe
               v-if="sample.htmlBody"
               class="bulk-mail-html-preview"

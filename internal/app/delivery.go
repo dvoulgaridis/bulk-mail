@@ -151,13 +151,18 @@ func (service *DeliveryService) TestProfile(ctx context.Context, profileID int64
 		}
 		return failure(ErrorValidation, "a test email address is required for this provider", nil)
 	}
-	_, err = service.send(ctx, sender, withSignature(mail.Message{
+	message, err := withSignature(mail.Message{
 		ToEmail: toEmail,
-		MessageContent: mail.MessageContent{
-			Subject: "Bulk Mail delivery test",
-			Body:    "Test.",
-		},
-	}))
+		MessageContent: renderMessage(mail.MessageContent{
+			Subject:    "Bulk Mail delivery test",
+			Body:       "Test.",
+			BodyFormat: "text",
+		}, nil, false),
+	})
+	if err != nil {
+		return failure(ErrorProcessing, err.Error(), err)
+	}
+	_, err = service.send(ctx, sender, message)
 	if err != nil {
 		return failure(ErrorValidation, err.Error(), err)
 	}

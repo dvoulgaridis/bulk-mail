@@ -93,7 +93,7 @@ export type Attachment = {
 export type MessageContent = {
   subject: string;
   body: string;
-  htmlBody: string;
+  bodyFormat: "text" | "html";
   requestDeliveryNotice: boolean;
   attachments: Attachment[];
 };
@@ -226,7 +226,6 @@ export type CampaignPreview = {
     email: string;
     name: string;
     subject: string;
-    body: string;
     htmlBody: string;
   }>;
   unresolved: string[];
@@ -260,7 +259,6 @@ export type CampaignPreflight = {
     email: string;
     name: string;
     subject: string;
-    body: string;
     htmlBody: string;
     attachments: PreflightAttachment[];
   }>;

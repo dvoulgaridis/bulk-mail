@@ -41,9 +41,6 @@ func (service *CampaignService) QueueCampaign(
 	if strings.TrimSpace(campaign.Message.Subject) == "" {
 		return tasks.Task{}, failure(ErrorValidation, "subject is required", nil)
 	}
-	if strings.TrimSpace(campaign.Message.Body) == "" {
-		return tasks.Task{}, failure(ErrorValidation, "message body is required", nil)
-	}
 	snapshot, err := service.captureCampaignSnapshot(ctx, campaign)
 	if err != nil {
 		return tasks.Task{}, err

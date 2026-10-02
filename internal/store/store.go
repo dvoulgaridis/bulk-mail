@@ -1186,7 +1186,7 @@ func (s *Store) SaveCampaign(ctx context.Context, campaign Campaign) (Campaign, 
 	if campaign.ID == NewCampaignID {
 		result, err := tx.ExecContext(ctx, `
 			INSERT INTO campaigns (
-				name, address_list_id, profile_id, subject, body, html_body,
+				name, address_list_id, profile_id, subject, body, body_format,
 				request_delivery_notice, personalization_json
 			) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		`, values...)
@@ -1201,7 +1201,7 @@ func (s *Store) SaveCampaign(ctx context.Context, campaign Campaign) (Campaign, 
 		values = append(values, campaign.ID)
 		result, err := tx.ExecContext(ctx, `
 			UPDATE campaigns SET
-				name = ?, address_list_id = ?, profile_id = ?, subject = ?, body = ?, html_body = ?,
+				name = ?, address_list_id = ?, profile_id = ?, subject = ?, body = ?, body_format = ?,
 				request_delivery_notice = ?, personalization_json = ?,
 				updated_at = CURRENT_TIMESTAMP
 			WHERE id = ?
@@ -1250,7 +1250,7 @@ func campaignValues(campaign Campaign, personalization string) []any {
 		campaign.ProfileID,
 		campaign.Message.Subject,
 		campaign.Message.Body,
-		campaign.Message.HTMLBody,
+		campaign.Message.BodyFormat,
 		campaign.Message.RequestDeliveryNotice,
 		personalization,
 	}
@@ -1329,7 +1329,7 @@ func (s *Store) DeleteCampaign(ctx context.Context, id int64) error {
 
 const campaignSelect = `
 	SELECT id, name, COALESCE(address_list_id, 0), profile_id,
-	       subject, body, html_body, request_delivery_notice,
+	       subject, body, body_format, request_delivery_notice,
 	       personalization_json, created_at, updated_at
 	FROM campaigns`
 
@@ -1361,7 +1361,7 @@ func scanCampaign(scanner campaignScanner) (Campaign, error) {
 		&campaign.ProfileID,
 		&campaign.Message.Subject,
 		&campaign.Message.Body,
-		&campaign.Message.HTMLBody,
+		&campaign.Message.BodyFormat,
 		&campaign.Message.RequestDeliveryNotice,
 		&personalization,
 		&campaign.CreatedAt,

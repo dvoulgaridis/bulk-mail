@@ -1,6 +1,7 @@
 package app
 
 import (
+	"html"
 	"maps"
 	"strings"
 	"unicode"
@@ -55,12 +56,17 @@ func personalizedFields(
 func renderMessage(message mail.MessageContent, fields map[string]string, substitute bool) mail.MessageContent {
 	if substitute {
 		message.Subject = templates.RenderText(message.Subject, fields)
-		message.Body = templates.RenderText(message.Body, fields)
-		message.HTMLBody = templates.RenderHTML(message.HTMLBody, fields)
+		if message.BodyFormat == "html" {
+			message.Body = templates.RenderHTML(message.Body, fields)
+		} else {
+			message.Body = templates.RenderText(message.Body, fields)
+		}
 	}
-	if strings.TrimSpace(message.HTMLBody) == "" {
-		message.HTMLBody = ""
+	if message.BodyFormat != "html" {
+		text := strings.ReplaceAll(strings.ReplaceAll(message.Body, "\r\n", "\n"), "\r", "\n")
+		message.Body = "<div>" + strings.ReplaceAll(html.EscapeString(text), "\n", "<br>\n") + "</div>"
 	}
+	message.BodyFormat = "html"
 	return message
 }
 

@@ -165,7 +165,7 @@ var schemaStatements = []string{
 		profile_id INTEGER REFERENCES smtp_profiles(id) ON DELETE SET NULL,
 		subject TEXT NOT NULL DEFAULT '',
 		body TEXT NOT NULL DEFAULT '',
-		html_body TEXT NOT NULL DEFAULT '',
+		body_format TEXT NOT NULL DEFAULT 'text' CHECK (body_format IN ('text', 'html')),
 		request_delivery_notice INTEGER NOT NULL DEFAULT 0,
 		personalization_json TEXT NOT NULL,
 		created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
