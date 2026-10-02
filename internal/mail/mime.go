@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"mime"
+	"mime/quotedprintable"
 	"net/mail"
 	"path/filepath"
 	"strings"
@@ -37,7 +38,7 @@ func WriteMessage(writer io.Writer, identity SenderIdentity, message Message) er
 		"Content-Type: " + contentType,
 	}
 	if len(message.Attachments) == 0 {
-		headers = append(headers, "Content-Transfer-Encoding: 8bit")
+		headers = append(headers, "Content-Transfer-Encoding: quoted-printable")
 	}
 	if strings.TrimSpace(identity.ReplyTo) != "" {
 		headers = append(headers, "Reply-To: "+sanitizeHeader(identity.ReplyTo))
@@ -57,8 +58,7 @@ func WriteMessage(writer io.Writer, identity SenderIdentity, message Message) er
 		return err
 	}
 	if len(message.Attachments) == 0 {
-		_, err := io.WriteString(writer, crlf(body))
-		return err
+		return writeBody(writer, body)
 	}
 	return writeMultipartBody(writer, message, boundary, bodyContentType, body)
 }
@@ -86,8 +86,11 @@ func mimeBoundary(seed string) string {
 
 func writeMultipartBody(writer io.Writer, message Message, boundary, contentType, body string) error {
 	content := "--" + boundary + "\r\nContent-Type: " + contentType + "\r\n" +
-		"Content-Transfer-Encoding: 8bit\r\n\r\n" + crlf(body)
+		"Content-Transfer-Encoding: quoted-printable\r\n\r\n"
 	if _, err := io.WriteString(writer, content); err != nil {
+		return err
+	}
+	if err := writeBody(writer, body); err != nil {
 		return err
 	}
 	if _, err := io.WriteString(writer, "\r\n"); err != nil {
@@ -114,8 +117,12 @@ func writeMultipartBody(writer io.Writer, message Message, boundary, contentType
 	return err
 }
 
-func crlf(value string) string {
-	return strings.ReplaceAll(strings.ReplaceAll(value, "\r\n", "\n"), "\n", "\r\n")
+func writeBody(writer io.Writer, body string) error {
+	encoder := quotedprintable.NewWriter(writer)
+	if _, err := io.WriteString(encoder, body); err != nil {
+		return err
+	}
+	return encoder.Close()
 }
 
 func writeBase64(writer io.Writer, content []byte) error {
