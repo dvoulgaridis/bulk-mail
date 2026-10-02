@@ -2,6 +2,7 @@ import {
   MAX_IMPORT_ROWS,
   addTruncationWarning,
   detectColumnMappingDetails,
+  rowHasValues,
   stripBOM,
 } from "./shared";
 import type { AddressFieldDefinition } from "../api/types";
@@ -64,7 +65,7 @@ function splitDelimitedRows(
 }
 
 function pushDelimitedRow(rows: string[][], row: string[], maxRows: number): boolean {
-  if (!row.some((value) => value.trim() !== "")) return false;
+  if (!rowHasValues(row)) return false;
   if (rows.length >= maxRows) return true;
   rows.push(row);
   return false;

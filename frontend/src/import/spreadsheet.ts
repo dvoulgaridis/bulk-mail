@@ -2,6 +2,7 @@ import {
   MAX_IMPORT_ROWS,
   addImportWarning,
   detectColumnMappingDetails,
+  rowHasValues,
 } from "./shared";
 import type { AddressFieldDefinition } from "../api/types";
 import type { ImportResult, ImportWarning } from "./types";
@@ -111,12 +112,15 @@ function parseWorksheetRows(xml: string, sharedStrings: string[]): string[][] {
       values[columnRefToIndex(cell.getAttribute("r") ?? "")] = worksheetCellValue(cell, sharedStrings);
     });
     return values;
-  });
+  }).filter(rowHasValues);
 }
 
 function worksheetCellValue(cell: Element, sharedStrings: string[]): string {
   const type = cell.getAttribute("t");
-  if (type === "s") return sharedStrings[Number(cell.getElementsByTagName("v")[0]?.textContent ?? "")] ?? "";
+  if (type === "s") {
+    const value = cell.getElementsByTagName("v")[0]?.textContent?.trim() ?? "";
+    return /^\d+$/.test(value) ? sharedStrings[Number(value)] ?? "" : "";
+  }
   if (type === "inlineStr") {
     return Array.from(cell.getElementsByTagName("t")).map((node) => node.textContent ?? "").join("");
   }

@@ -10,6 +10,10 @@ const emailHeaders = new Set(["email", "e_mail", "mail", "email_address", "e_mai
 const firstNameHeaders = new Set(["first_name", "firstname", "first", "given_name", "given"]);
 const lastNameHeaders = new Set(["last_name", "lastname", "last", "surname", "family_name", "family"]);
 
+export function rowHasValues(row: string[]): boolean {
+  return row.some((value) => value.trim() !== "");
+}
+
 export function detectColumnMappingDetails(
   headers: string[],
   definitions: AddressFieldDefinition[],

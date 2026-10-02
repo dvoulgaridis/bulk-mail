@@ -22,6 +22,7 @@ export function parseVCardAddressList(
   const entries = [];
   contacts: for (const block of blocks) {
     const contact = parseVCardBlock(block);
+    if (!contact) continue;
     for (const email of contact.emails) {
       if (entries.length === MAX_IMPORT_ROWS) {
         addImportWarning(warnings, MAX_IMPORT_ROWS + 1, `File truncated after ${MAX_IMPORT_ROWS} address entries.`);
@@ -49,6 +50,14 @@ function parseVCardBlock(block: string) {
   const properties = unfoldVCardLines(block)
     .map(parsePropertyLine)
     .filter((item): item is VCardProperty => item !== null);
+  const hasContent = properties.some((property) => {
+    if (property.name === "VERSION") return false;
+    const values = property.name === "N"
+      ? splitStructuredValue(property.value)
+      : [unescapeVCardText(property.value)];
+    return values.some((value) => value.trim() !== "");
+  });
+  if (!hasContent) return null;
   const structuredName = properties.find((property) => property.name === "N");
   let firstName = "";
   let lastName = "";
@@ -73,7 +82,6 @@ function vcardBlocks(text: string, warnings: ImportWarning[]): string[] {
   let match: RegExpExecArray | null;
   while ((match = pattern.exec(text))) {
     blocks.push(match[1] ?? "");
-    if (blocks.length > MAX_IMPORT_ROWS) break;
   }
   if (blocks.length === 0 && text.trim()) addImportWarning(warnings, 1, "No vCard entries were found.");
   return blocks;
