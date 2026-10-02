@@ -9,7 +9,6 @@ import type { ImportResult, ImportWarning } from "./types";
 
 type VCardProperty = {
   name: string;
-  params: string[];
   value: string;
 };
 
@@ -98,11 +97,9 @@ function unfoldVCardLines(block: string): string[] {
 function parsePropertyLine(line: string): VCardProperty | null {
   const separator = line.indexOf(":");
   if (separator < 0) return null;
-  const nameParts = line.slice(0, separator).split(";");
-  const rawName = nameParts.shift() ?? "";
+  const rawName = line.slice(0, separator).split(";", 1)[0] ?? "";
   return {
     name: (rawName.includes(".") ? rawName.split(".").pop() ?? rawName : rawName).toUpperCase(),
-    params: nameParts.map((value) => value.toUpperCase()),
     value: line.slice(separator + 1),
   };
 }
