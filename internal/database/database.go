@@ -11,7 +11,7 @@ import (
 
 const (
 	applicationID = 0x424d424d
-	schemaVersion = 7
+	schemaVersion = 8
 )
 
 func Open(path string) (*sql.DB, error) {
