@@ -77,6 +77,7 @@ function createAddressListsFeature(workspace: WorkspaceContext) {
   const writing = ref(false);
   let nextDraftKey = 0;
   const selectedEntryKeys = ref<string[]>([]);
+  const selectedListKeys = ref<string[]>([]);
   const selectedList = reactive<EditableAddressList>(emptyAddressList(workspace.state.addressFieldDefaults));
   let savedMetadata = metadataKey(selectedList);
   const importState = reactive<ImportState>({
@@ -243,6 +244,36 @@ function createAddressListsFeature(workspace: WorkspaceContext) {
       await workspace.refresh();
       notifyEntryWrites(workspace, result);
     });
+  }
+
+  async function deleteSelectedLists(): Promise<void> {
+    if (writing.value || selectedListKeys.value.length === 0) return;
+    const selected = new Set(selectedListKeys.value);
+    const lists = workspace.state.addressLists.filter((list) => selected.has(String(list.id)));
+    if (!lists.length || !window.confirm(
+      `Delete ${lists.length} selected address list(s) and all their entries?`,
+    )) return;
+    writing.value = true;
+    try {
+      await workspace.runAction(async () => {
+        let deleted = 0;
+        const failures: string[] = [];
+        for (const list of lists) {
+          try {
+            await workspace.api.request<void>(`/api/address-lists/${list.id}`, { method: "DELETE" });
+            selectedListKeys.value = selectedListKeys.value.filter((key) => key !== String(list.id));
+            deleted++;
+          } catch (error) {
+            failures.push(`${list.name}: ${error instanceof Error ? error.message : String(error)}`);
+          }
+        }
+        await workspace.refresh();
+        if (deleted) workspace.notify(`${deleted} address list(s) deleted.`);
+        if (failures.length) workspace.notify(failures.join("\n"), "error");
+      });
+    } finally {
+      writing.value = false;
+    }
   }
 
   async function suppressSelectedEntries(): Promise<void> {
@@ -472,6 +503,7 @@ function createAddressListsFeature(workspace: WorkspaceContext) {
     listSearch,
     entrySearch,
     selectedEntryKeys,
+    selectedListKeys,
     listRows,
     entryRows,
     entryGridStyle,
@@ -481,6 +513,7 @@ function createAddressListsFeature(workspace: WorkspaceContext) {
     edit,
     addEntry,
     deleteSelectedEntries,
+    deleteSelectedLists,
     suppressSelectedEntries,
     handleImportChange,
     mappingPreview,

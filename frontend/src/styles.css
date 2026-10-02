@@ -1097,7 +1097,8 @@ code {
 }
 
 .data-table__row--lists {
-  grid-template-columns: minmax(10rem, 12rem) minmax(12rem, 1fr) minmax(7rem, 8rem) minmax(10rem, 1fr);
+  grid-template-columns:
+    3rem minmax(10rem, 12rem) minmax(12rem, 1fr) minmax(7rem, 8rem) minmax(10rem, 1fr);
 }
 
 .data-table__row--profiles {
